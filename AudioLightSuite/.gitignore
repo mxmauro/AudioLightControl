@@ -1,0 +1,15 @@
+*.~*
+*.suo
+*.ncb
+*.exp
+*.user
+*.aps
+*.sdf
+*.log
+*.obj
+*.ilk
+/.vs/
+/bin/
+/data/
+/obj/
+/vcpkg_installed/

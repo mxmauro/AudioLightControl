@@ -1,0 +1,10 @@
+{
+  "name": "audiolightcontrol",
+  "version-string": "1.0.0",
+  "dependencies": [
+    {
+      "name": "guiterminal",
+      "version>=": "0.7.2"
+    }
+  ]
+}

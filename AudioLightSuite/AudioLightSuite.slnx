@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="src\Streamer\AudioLightStreamer.vcxproj" Id="82d3e87e-6008-457d-bca6-c1a32cfd8682" />
+  <Project Path="src\Preprocessor\AudioLightPreprocessor.vcxproj" Id="fa7c81fa-35d7-41b6-8f92-569b531fbe23" />
+</Solution>

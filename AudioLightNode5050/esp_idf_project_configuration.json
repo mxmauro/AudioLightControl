@@ -1,0 +1,69 @@
+{
+  "Debug": {
+    "build": {
+      "compileArgs": [
+        "-G",
+        "Ninja",
+        "-DPYTHON_DEPS_CHECKED=1",
+        "-DESP_PLATFORM=1",
+        "-DIDF_TARGET=esp32c3"
+      ],
+      "ninjaArgs": [],
+      "buildDirectoryPath": "${workspaceFolder}/build/debug",
+      "sdkconfigDefaults": [
+        "sdkconfig.defaults",
+        "sdkconfig.debug"
+      ],
+      "sdkconfigFilePath": "debug/sdkconfig"
+    },
+    "env": {},
+    "idfTarget": "esp32c3",
+    "flashBaudRate": "",
+    "monitorBaudRate": "115200",
+    "openOCD": {
+      "debugLevel": -1,
+      "configs": [],
+      "args": []
+    },
+    "tasks": {
+      "preBuild": "",
+      "preFlash": "",
+      "postBuild": "",
+      "postFlash": ""
+    }
+  },
+  "Release": {
+    "build": {
+      "compileArgs": [
+        "-G",
+        "Ninja",
+        "-DPYTHON_DEPS_CHECKED=1",
+        "-DESP_PLATFORM=1",
+        "-DIDF_TARGET=esp32c3",
+        "-DCMAKE_BUILD_TYPE=Release"
+      ],
+      "ninjaArgs": [],
+      "buildDirectoryPath": "${workspaceFolder}/build/release",
+      "sdkconfigDefaults": [
+        "sdkconfig.defaults",
+        "sdkconfig.release"
+      ],
+      "sdkconfigFilePath": "release/sdkconfig"
+    },
+    "env": {},
+    "idfTarget": "esp32c3",
+    "flashBaudRate": "",
+    "monitorBaudRate": "115200",
+    "openOCD": {
+      "debugLevel": 0,
+      "configs": [],
+      "args": []
+    },
+    "tasks": {
+      "preBuild": "",
+      "preFlash": "",
+      "postBuild": "",
+      "postFlash": ""
+    }
+  }
+}

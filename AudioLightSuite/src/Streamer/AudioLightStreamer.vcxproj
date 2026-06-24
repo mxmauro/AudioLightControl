@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{82D3E87E-6008-457D-BCA6-C1A32CFD8682}</ProjectGuid>
+    <RootNamespace>AudioLightStreamer</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgRoot Condition="Exists('$([System.Environment]::GetFolderPath(SpecialFolder.UserProfile))\.vcpkg')">$([System.Environment]::GetFolderPath(SpecialFolder.UserProfile))\.vcpkg</VcpkgRoot>
+    <VcpkgManifestRoot>$(MSBuildThisFileDirectory)..\..\</VcpkgManifestRoot>
+    <VcpkgInstalledDir>$(MSBuildThisFileDirectory)..\..\vcpkg_installed\</VcpkgInstalledDir>
+    <VcpkgTriplet>x64-windows-static</VcpkgTriplet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(ProjectDir)..\..\bin\</OutDir>
+    <IntDir>$(ProjectDir)..\..\obj\$(ShortProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)..\..\bin\</OutDir>
+    <IntDir>$(ProjectDir)..\..\obj\$(ShortProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\TUI\TUiFrameWindow.cpp" />
+    <ClCompile Include="..\Common\TUI\TUiWindow.cpp" />
+    <ClCompile Include="..\Common\TUI\TUiWindowManager.cpp" />
+    <ClCompile Include="..\Common\Utils\FNV.cpp" />
+    <ClCompile Include="AppConfig.cpp" />
+    <ClCompile Include="AudioLightStreamer.cpp" />
+    <ClCompile Include="CommandLine.cpp" />
+    <ClCompile Include="Devices\BaseIotDevice.cpp" />
+    <ClCompile Include="Devices\LedStrip5050.cpp" />
+    <ClCompile Include="Devices\SharedManualColorControl.cpp" />
+    <ClCompile Include="Engine.cpp" />
+    <ClCompile Include="Monitors\AudioAnalysisMonitor.cpp" />
+    <ClCompile Include="Monitors\BaseMonitor.cpp" />
+    <ClCompile Include="OutputAudioCapture.cpp" />
+    <ClCompile Include="Processors\BaseAudioProcessor.cpp" />
+    <ClCompile Include="Processors\SpectrumColor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Audio\AudioAnalysis.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Crypto\Aes.cpp" />
+    <ClCompile Include="..\Common\Crypto\Base64.cpp" />
+    <ClCompile Include="..\Common\Crypto\Hkdf.cpp" />
+    <ClCompile Include="..\Common\Crypto\P256.cpp" />
+    <ClCompile Include="..\Common\Crypto\Random.cpp" />
+    <ClCompile Include="..\Common\Crypto\Sha256.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Http\HttpClient.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\IotComm\IotCommClient.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Utils\MathHelpers.cpp" />
+    <ClCompile Include="..\Common\Utils\MessageBoxUtils.cpp" />
+    <ClCompile Include="..\Common\Utils\PersistantSettings.cpp" />
+    <ClCompile Include="..\Common\Utils\RundownProtection.cpp" />
+    <ClCompile Include="..\Common\Utils\Timer.cpp" />
+    <ClCompile Include="..\Common\Utils\WinRegistry.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\ThirdParty\ankerl_unordered_dense\stl.h" />
+    <ClInclude Include="..\Common\ThirdParty\ankerl_unordered_dense\unordered_dense.h" />
+    <ClInclude Include="..\Common\TUI\TUiFrameWindow.h" />
+    <ClInclude Include="..\Common\TUI\TUiWindow.h" />
+    <ClInclude Include="..\Common\TUI\TUiWindowManager.h" />
+    <ClInclude Include="..\Common\Utils\FNV.h" />
+    <ClInclude Include="..\Common\Utils\WinsockStart.h" />
+    <ClInclude Include="AppConfig.h" />
+    <ClInclude Include="CommandLine.h" />
+    <ClInclude Include="Devices\BaseIotDevice.h" />
+    <ClInclude Include="Devices\LedStrip5050.h" />
+    <ClInclude Include="Devices\SharedManualColorControl.h" />
+    <ClInclude Include="Engine.h" />
+    <ClInclude Include="Monitors\AudioAnalysisMonitor.h" />
+    <ClInclude Include="Monitors\BaseMonitor.h" />
+    <ClInclude Include="OutputAudioCapture.h" />
+    <ClInclude Include="Processors\BaseAudioProcessor.h" />
+    <ClInclude Include="Processors\SpectrumColor.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Audio\AudioAnalysis.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Crypto\Aes.h" />
+    <ClInclude Include="..\Common\Crypto\Base64.h" />
+    <ClInclude Include="..\Common\Crypto\Hkdf.h" />
+    <ClInclude Include="..\Common\Crypto\P256.h" />
+    <ClInclude Include="..\Common\Crypto\Random.h" />
+    <ClInclude Include="..\Common\Crypto\Sha256.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Http\HttpClient.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\IotComm\IotCommClient.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\ThirdParty\nlohmann_json\json.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Utils\Exception2HR.h" />
+    <ClInclude Include="..\Common\Utils\MathHelpers.h" />
+    <ClInclude Include="..\Common\Utils\MessageBoxUtils.h" />
+    <ClInclude Include="..\Common\Utils\Mutex.h" />
+    <ClInclude Include="..\Common\Utils\PersistantSettings.h" />
+    <ClInclude Include="..\Common\Utils\ReaderWriterLock.h" />
+    <ClInclude Include="..\Common\Utils\RundownProtection.h" />
+    <ClInclude Include="..\Common\Utils\Threads.h" />
+    <ClInclude Include="..\Common\Utils\TimedEvent.h" />
+    <ClInclude Include="..\Common\Utils\Timer.h" />
+    <ClInclude Include="..\Common\Utils\WinRegistry.h" />
+    <ClInclude Include="..\Common\Utils\WindowsEvent.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AudioLightStreamer.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="AudioLightStreamer.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\vcpkg-configuration.json" />
+    <None Include="..\..\vcpkg.json" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

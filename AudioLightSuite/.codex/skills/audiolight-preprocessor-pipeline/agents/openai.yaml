@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLight Preprocessor Pipeline"
+  short_description: "Edit offline extraction and feature output"
+  default_prompt: "Use $audiolight-preprocessor-pipeline to modify the offline feature extraction pipeline or its CLI flow."

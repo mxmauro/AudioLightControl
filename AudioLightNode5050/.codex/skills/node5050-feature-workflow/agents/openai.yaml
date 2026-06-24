@@ -1,0 +1,4 @@
+interface:
+  display_name: "Node5050 Feature Flow"
+  short_description: "Change commands, lifecycle, and PWM behavior"
+  default_prompt: "Use $node5050-feature-workflow to modify AudioLightNode5050 firmware behavior safely."

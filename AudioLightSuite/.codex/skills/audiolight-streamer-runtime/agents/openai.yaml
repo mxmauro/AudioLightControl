@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLight Streamer Runtime"
+  short_description: "Edit streamer startup, audio, and device flow"
+  default_prompt: "Use $audiolight-streamer-runtime to modify the Win32 streamer runtime, config flow, audio capture, or device wiring."

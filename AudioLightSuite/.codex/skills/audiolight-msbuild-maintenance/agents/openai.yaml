@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLight MSBuild Maintenance"
+  short_description: "Update VCXPROJ files, builds, and vcpkg"
+  default_prompt: "Use $audiolight-msbuild-maintenance to update project metadata, validate builds, or maintain vcpkg dependencies."

@@ -1,0 +1,349 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4C08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Devices">
+      <UniqueIdentifier>{EDBBCF21-84FA-4508-98E2-C18D717FC009}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Devices">
+      <UniqueIdentifier>{3B862723-9415-4278-A8F7-C50939384B0E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Processors">
+      <UniqueIdentifier>{8BBB93DC-D6E6-4CC9-85C0-C71015A7E2B3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Processors">
+      <UniqueIdentifier>{65B7F4B8-082F-45FA-A1E3-23DD6DD9DA4B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Monitors">
+      <UniqueIdentifier>{b8ac018d-9ef2-44cb-a674-c7097b1d9e30}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Monitors">
+      <UniqueIdentifier>{2378db87-a9d4-4de9-86c9-c99f59f6159f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common">
+      <UniqueIdentifier>{05CD2C18-9B17-4D6A-B31B-E4E3A0E7804D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common">
+      <UniqueIdentifier>{4371DA0D-F7D5-4288-8176-F22B34E18B2A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Audio">
+      <UniqueIdentifier>{E8B4E980-E90D-4AEF-AF23-F164627E15AB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Audio">
+      <UniqueIdentifier>{A5CBB85F-6899-4D64-A0B7-6D83E1A19EB5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Crypto">
+      <UniqueIdentifier>{E2A027C6-A406-49FB-AC36-5AEE8FEFF80D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Crypto">
+      <UniqueIdentifier>{0E782C14-12D5-4E67-AA97-1B5604238B0A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Http">
+      <UniqueIdentifier>{8B396EF9-7D98-4428-8AEF-63D6AFC14113}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Http">
+      <UniqueIdentifier>{7817763B-32E6-4346-830A-AE821CDFCE9A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\IotComm">
+      <UniqueIdentifier>{ACB3368D-3E48-4246-8400-0061729487E1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\IotComm">
+      <UniqueIdentifier>{B89A6716-55E6-438B-AFD1-8DC4BF8D533D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Utils">
+      <UniqueIdentifier>{82824C2C-C5F8-4310-A9DF-61A84B62CA8D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Utils">
+      <UniqueIdentifier>{C47CD39F-7FE9-4305-B369-D0B7A6F60A26}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\ThirdParty">
+      <UniqueIdentifier>{A4356DEE-0195-47D2-8208-63D44B4A7986}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\ThirdParty\JSON">
+      <UniqueIdentifier>{22CA63DC-9BEF-469A-AD29-B8D819EB4F35}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="VCPkg">
+      <UniqueIdentifier>{5A406A67-1FDD-41C9-AAAC-122C29848FB5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\TUI">
+      <UniqueIdentifier>{4801f563-f32a-48c2-8a3a-d5142d4f457b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\TUI">
+      <UniqueIdentifier>{8395f793-301a-4c5b-b5e7-1995b8caab6a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\ThirdParty\HashMap">
+      <UniqueIdentifier>{932efca9-fbec-4076-b687-96f2245d941c}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AudioLightStreamer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AppConfig.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandLine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OutputAudioCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\BaseIotDevice.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\LedStrip5050.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\SharedManualColorControl.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Processors\BaseAudioProcessor.cpp">
+      <Filter>Source Files\Processors</Filter>
+    </ClCompile>
+    <ClCompile Include="Processors\SpectrumColor.cpp">
+      <Filter>Source Files\Processors</Filter>
+    </ClCompile>
+    <ClCompile Include="Monitors\BaseMonitor.cpp">
+      <Filter>Source Files\Monitors</Filter>
+    </ClCompile>
+    <ClCompile Include="Monitors\AudioAnalysisMonitor.cpp">
+      <Filter>Source Files\Monitors</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\TUI\TUiWindow.cpp">
+      <Filter>Source Files\Common\TUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\TUI\TUiFrameWindow.cpp">
+      <Filter>Source Files\Common\TUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\FNV.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\TUI\TUiWindowManager.cpp">
+      <Filter>Source Files\Common\TUI</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Audio\AudioAnalysis.cpp">
+      <Filter>Source Files\Common\Audio</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Crypto\Aes.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Crypto\Base64.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Crypto\Hkdf.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Crypto\P256.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Crypto\Random.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Crypto\Sha256.cpp">
+      <Filter>Source Files\Common\Crypto</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Http\HttpClient.cpp">
+      <Filter>Source Files\Common\Http</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\IotComm\IotCommClient.cpp">
+      <Filter>Source Files\Common\IotComm</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Utils\MathHelpers.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\MessageBoxUtils.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\PersistantSettings.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\RundownProtection.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\Timer.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\WinRegistry.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AppConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CommandLine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OutputAudioCapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\BaseIotDevice.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\LedStrip5050.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\SharedManualColorControl.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Processors\BaseAudioProcessor.h">
+      <Filter>Header Files\Processors</Filter>
+    </ClInclude>
+    <ClInclude Include="Processors\SpectrumColor.h">
+      <Filter>Header Files\Processors</Filter>
+    </ClInclude>
+    <ClInclude Include="Monitors\BaseMonitor.h">
+      <Filter>Header Files\Monitors</Filter>
+    </ClInclude>
+    <ClInclude Include="Monitors\AudioAnalysisMonitor.h">
+      <Filter>Header Files\Monitors</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\WinsockStart.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\TUI\TUiWindow.h">
+      <Filter>Header Files\Common\TUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\TUI\TUiFrameWindow.h">
+      <Filter>Header Files\Common\TUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\FNV.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\TUI\TUiWindowManager.h">
+      <Filter>Header Files\Common\TUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\ThirdParty\ankerl_unordered_dense\stl.h">
+      <Filter>Header Files\Common\ThirdParty\HashMap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\ThirdParty\ankerl_unordered_dense\unordered_dense.h">
+      <Filter>Header Files\Common\ThirdParty\HashMap</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Audio\AudioAnalysis.h">
+      <Filter>Header Files\Common\Audio</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Crypto\Aes.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Crypto\Base64.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Crypto\Hkdf.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Crypto\P256.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Crypto\Random.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Crypto\Sha256.h">
+      <Filter>Header Files\Common\Crypto</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Http\HttpClient.h">
+      <Filter>Header Files\Common\Http</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\IotComm\IotCommClient.h">
+      <Filter>Header Files\Common\IotComm</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\ThirdParty\nlohmann_json\json.hpp">
+      <Filter>Header Files\Common\ThirdParty\JSON</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Utils\Exception2HR.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\MathHelpers.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\MessageBoxUtils.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\Mutex.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\PersistantSettings.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\ReaderWriterLock.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\RundownProtection.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\Threads.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\TimedEvent.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\Timer.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\WinRegistry.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\WindowsEvent.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AudioLightStreamer.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="AudioLightStreamer.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\vcpkg.json">
+      <Filter>VCPkg</Filter>
+    </None>
+    <None Include="..\..\vcpkg-configuration.json">
+      <Filter>VCPkg</Filter>
+    </None>
+  </ItemGroup>
+</Project>

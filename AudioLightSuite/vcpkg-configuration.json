@@ -1,0 +1,16 @@
+{
+  "default-registry": {
+    "kind": "builtin",
+    "baseline": "32305df7d0b9a308e6ac454dd98ebfe550342c09"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "baseline": "e7f6c9c54d890c82174fa11c801322d348f4c569",
+      "repository": "https://github.com/mxmauro/vcpkg-registry",
+      "packages": [
+        "guiterminal"
+      ]
+    }
+  ]
+}

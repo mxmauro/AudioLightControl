@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLight IoT Comm Stack"
+  short_description: "Change IoT comm, crypto, and device protocol"
+  default_prompt: "Use $audiolight-iotcomm-stack to change IoT device communication, authentication, or shared protocol code."

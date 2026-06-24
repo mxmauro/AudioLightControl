@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4C08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Common">
+      <UniqueIdentifier>{5DF7FE6E-CE11-40D8-98C9-A4B5D2D62071}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common">
+      <UniqueIdentifier>{CC6DDFD5-9B65-4CF7-87C0-410F6D26F3BA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Audio">
+      <UniqueIdentifier>{E294FAF0-E325-4C53-B9BE-C4A11AB6B17F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Audio">
+      <UniqueIdentifier>{8A312F0C-7922-4FA2-9A72-F93E2C01F403}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Common\Utils">
+      <UniqueIdentifier>{B9D7FD8E-4B27-4D88-9A06-E87375548D5D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Common\Utils">
+      <UniqueIdentifier>{8A3A7304-8D0C-4BE9-AB5E-46FC7F8F8B25}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="VCPkg">
+      <UniqueIdentifier>{5A406A67-1FDD-41C9-AAAC-122C29848FB5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Common\Audio\AudioAnalysis.cpp">
+      <Filter>Source Files\Common\Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioLightPreprocessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandLine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FeatureExtractor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\MathHelpers.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Utils\WinRegistry.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Common\Audio\AudioAnalysis.h">
+      <Filter>Header Files\Common\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="FeatureExtractor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CommandLine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\Exception2HR.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\MathHelpers.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\WinRegistry.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AudioLightPreprocessor.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="AudioLightPreprocessor.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\vcpkg.json">
+      <Filter>VCPkg</Filter>
+    </None>
+    <None Include="..\..\vcpkg-configuration.json">
+      <Filter>VCPkg</Filter>
+    </None>
+  </ItemGroup>
+</Project>
