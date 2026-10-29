@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 #include "..\Utils\Mutex.h"
-#include "..\Utils\Threads.h"
 
 // -----------------------------------------------------------------------------
 

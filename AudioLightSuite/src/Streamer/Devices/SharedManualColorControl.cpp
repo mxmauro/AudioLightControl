@@ -37,7 +37,7 @@ static constexpr INT MAX_WINDOW_WIDTH = 60;
 
 // -----------------------------------------------------------------------------
 
-CSharedManualColorControlWindow::CSharedManualColorControlWindow(_In_ const std::vector<CBaseIotDevice *> &vecDevices) noexcept
+CSharedManualColorControlWindow::CSharedManualColorControlWindow(_In_ const std::vector<CBaseIotDevice *> &vecDevices)
 {
     m_vecDevices.reserve(vecDevices.size());
     for (CBaseIotDevice *lpDevice : vecDevices)

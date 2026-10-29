@@ -5,6 +5,7 @@
 #include <math.h>
 
 #define MATH_EPSILON 1e-5f
+#define MATH_PI      3.14159265358979323846f
 
 // -----------------------------------------------------------------------------
 
@@ -126,6 +127,21 @@ static inline VOID HSV2RGB(_In_ float h, _In_ float s, _In_ float v, _Out_ LPBYT
     *lpR = (BYTE)(Clamp(fR) * 255.0f);
     *lpG = (BYTE)(Clamp(fG) * 255.0f);
     *lpB = (BYTE)(Clamp(fB) * 255.0f);
+}
+
+static inline VOID HSV2RGBW(_In_ float h, _In_ float s, _In_ float v, _Out_ LPBYTE lpR, _Out_ LPBYTE lpG, _Out_ LPBYTE lpB,
+                            _Out_ LPBYTE lpW)
+{
+    BYTE r, g, b;
+    BYTE w;
+
+    HSV2RGB(h, s, v, &r, &g, &b);
+
+    w = (r <= g && r <= b) ? r : ((g <= b) ? g : b);
+    *lpR = r - w;
+    *lpG = g - w;
+    *lpB = b - w;
+    *lpW = w;
 }
 
 static inline USHORT be16(_In_ USHORT u)

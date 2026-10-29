@@ -6,43 +6,49 @@
 #include <windows.h>
 #include "CommandLine.h"
 #include "FeatureExtractor.h"
-#include "..\Common\Utils\WinsockStart.h"
+#include "..\Common\Utils\ComStart.h"
 #include <mfapi.h>
 #include <stdio.h>
 
 // -----------------------------------------------------------------------------
 
-static VOID PrintUsage() noexcept
-{
-    fwprintf(stderr, L"Usage: AudioLightPreprocessor --input <input.mp3> [--output <output.alcfeat>]\n");
-}
+static HRESULT RunPreprocessor();
 
 // -----------------------------------------------------------------------------
 
 INT wmain(_In_ INT argc, _In_reads_(argc) LPWSTR argvW[])
 {
-    CWinsockStart cWinsockStart;
     HRESULT hRes;
 
+#ifdef _DEBUG
+    //_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_CHECK_CRT_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif //_DEBUG
+
+    // Parse command line parameters
     hRes = ParseCmdLimeParameters(argc, argvW);
     if (FAILED(hRes))
     {
         return (int)hRes;
     }
 
-    if (!cWinsockStart.Succeeded())
+    return (int)RunPreprocessor();
+}
+
+// -----------------------------------------------------------------------------
+
+static HRESULT RunPreprocessor()
+{
+    CComStart cComStart;
+    HRESULT hRes;
+
+    // Check COM initialization
+    if (!cComStart.Succeeded())
     {
-        fwprintf(stderr, L"Error 0x%08X: Unable to initialize Winsock.\n", (unsigned int)cWinsockStart.HResult());
-        return (int)cWinsockStart.HResult();
+        fwprintf(stderr, L"Error 0x%08X: Unable to initialize COM.\n", (unsigned int)cComStart.HResult());
+        return (int)cComStart.HResult();
     }
 
-    hRes = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(hRes))
-    {
-        fwprintf(stderr, L"Error 0x%08X: Unable to initialize COM.", (unsigned int)hRes);
-        return (int)hRes;
-    }
-
+    // Run preprocessor
     hRes = ::MFStartup(MF_VERSION);
     if (SUCCEEDED(hRes))
     {
@@ -57,6 +63,5 @@ INT wmain(_In_ INT argc, _In_reads_(argc) LPWSTR argvW[])
     }
 
     // Done
-    ::CoUninitialize();
     return (int)hRes;
 }

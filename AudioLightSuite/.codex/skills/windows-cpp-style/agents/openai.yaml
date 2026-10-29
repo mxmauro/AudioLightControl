@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows C++ Style"
+  short_description: "Win32 C++ source conventions"
+  default_prompt: "Use $windows-cpp-style while editing this Windows C++ code."

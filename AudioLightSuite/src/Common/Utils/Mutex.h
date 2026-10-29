@@ -41,6 +41,7 @@ public:
     private:
         CMutex &m_cMutex;
     };
+
 private:
     CRITICAL_SECTION m_cs;
 };

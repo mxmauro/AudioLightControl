@@ -99,13 +99,22 @@
     <ClCompile Include="Engine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="OutputAudioCapture.cpp">
+    <ClCompile Include="AudioCapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Devices\BaseIotDevice.cpp">
       <Filter>Source Files\Devices</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\LedStrip5050.cpp">
+    <ClCompile Include="Devices\AudioLightNodeIotDevice.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\DmxIotDevice.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\GoveeStripIotDevice.cpp">
+      <Filter>Source Files\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\Rgb5050IotDevice.cpp">
       <Filter>Source Files\Devices</Filter>
     </ClCompile>
     <ClCompile Include="Devices\SharedManualColorControl.cpp">
@@ -114,7 +123,13 @@
     <ClCompile Include="Processors\BaseAudioProcessor.cpp">
       <Filter>Source Files\Processors</Filter>
     </ClCompile>
+    <ClCompile Include="Processors\BandSpectrum.cpp">
+      <Filter>Source Files\Processors</Filter>
+    </ClCompile>
     <ClCompile Include="Processors\SpectrumColor.cpp">
+      <Filter>Source Files\Processors</Filter>
+    </ClCompile>
+    <ClCompile Include="Processors\TrebleStrobe.cpp">
       <Filter>Source Files\Processors</Filter>
     </ClCompile>
     <ClCompile Include="Monitors\BaseMonitor.cpp">
@@ -201,7 +216,7 @@
     <ClInclude Include="Engine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="OutputAudioCapture.h">
+    <ClInclude Include="AudioCapture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="resource.h">
@@ -210,7 +225,16 @@
     <ClInclude Include="Devices\BaseIotDevice.h">
       <Filter>Header Files\Devices</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\LedStrip5050.h">
+    <ClInclude Include="Devices\AudioLightNodeIotDevice.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\DmxIotDevice.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\GoveeStripIotDevice.h">
+      <Filter>Header Files\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\Rgb5050IotDevice.h">
       <Filter>Header Files\Devices</Filter>
     </ClInclude>
     <ClInclude Include="Devices\SharedManualColorControl.h">
@@ -219,7 +243,13 @@
     <ClInclude Include="Processors\BaseAudioProcessor.h">
       <Filter>Header Files\Processors</Filter>
     </ClInclude>
+    <ClInclude Include="Processors\BandSpectrum.h">
+      <Filter>Header Files\Processors</Filter>
+    </ClInclude>
     <ClInclude Include="Processors\SpectrumColor.h">
+      <Filter>Header Files\Processors</Filter>
+    </ClInclude>
+    <ClInclude Include="Processors\TrebleStrobe.h">
       <Filter>Header Files\Processors</Filter>
     </ClInclude>
     <ClInclude Include="Monitors\BaseMonitor.h">
@@ -248,6 +278,12 @@
     </ClInclude>
     <ClInclude Include="..\Common\ThirdParty\ankerl_unordered_dense\unordered_dense.h">
       <Filter>Header Files\Common\ThirdParty\HashMap</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\ComStart.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\RwMutex.h">
+      <Filter>Header Files\Common\Utils</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -322,6 +358,9 @@
       <Filter>Header Files\Common\Utils</Filter>
     </ClInclude>
     <ClInclude Include="..\Common\Utils\WinRegistry.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\WindowsHandle.h">
       <Filter>Header Files\Common\Utils</Filter>
     </ClInclude>
     <ClInclude Include="..\Common\Utils\WindowsEvent.h">

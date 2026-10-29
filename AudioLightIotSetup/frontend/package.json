@@ -1,0 +1,44 @@
+{
+	"name": "audiolight-iot-setup",
+	"private": true,
+	"version": "0.1.0",
+	"license": "MIT",
+	"author": "Mauro H. Leggieri",
+	"type": "module",
+	"homepage": "https://github.com/mxmauro/audiolight-iot-setup",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mxmauro/audiolight-iot-setup.git"
+	},
+	"scripts": {
+		"dev": "vite",
+		"build": "biome check && vite build",
+		"preview": "vite preview",
+		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+		"biome:check": "biome check --verbose",
+		"biome:format": "biome format --fix",
+		"biome:migrate": "biome migrate --write"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.6.3",
+		"@skeletonlabs/skeleton": "^5.0.1",
+		"@skeletonlabs/skeleton-svelte": "^5.0.1",
+		"@sveltejs/vite-plugin-svelte": "^7.3.1",
+		"@tailwindcss/forms": "^0.5.11",
+		"@tsconfig/svelte": "^5.0.8",
+		"@types/node": "^26.6.6",
+		"svelte": "^5.57.3",
+		"svelte-check": "^4.7.7",
+		"typescript": "~6.0.3",
+		"vite": "^8.3.5"
+	},
+	"dependencies": {
+		"@lucide/svelte": "^1.63.0",
+		"@mxmauro/iot-comm.js": "^0.2.2",
+		"@tailwindcss/vite": "^4.3.3",
+		"tailwindcss": "^4.3.3"
+	},
+	"allowScripts": {
+		"bufferutil@4.1.0": true
+	}
+}

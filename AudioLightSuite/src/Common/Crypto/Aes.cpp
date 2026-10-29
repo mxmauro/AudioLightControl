@@ -102,7 +102,7 @@ HRESULT CAes::Encrypt(_In_reads_bytes_(nPlainTextLen) LPCVOID lpPlainText, _In_ 
     NTSTATUS nNtStatus;
 
     // Verify parameters
-    if ((!lpPlainText) || nPlainTextLen == 0 || (!lpIV) || nIVLen == 0 || (!lpCipherTextAndTag))
+    if (((!lpPlainText) && nPlainTextLen > 0) || (!lpIV) || nIVLen == 0 || (!lpCipherTextAndTag))
     {
         return E_INVALIDARG;
     }
@@ -160,7 +160,7 @@ HRESULT CAes::Decrypt(_In_reads_bytes_(nCipherTextLen) LPCVOID lpCipherText,
     NTSTATUS nNtStatus;
 
     // Verify parameters
-    if ((!lpCipherText) || nCipherTextLen <= GCM_TAG_LEN || (!lpIV) || nIVLen == 0 || (!lpPlainText))
+    if ((!lpCipherText) || nCipherTextLen < GCM_TAG_LEN || (!lpIV) || nIVLen == 0 || ((!lpPlainText) && nCipherTextLen > GCM_TAG_LEN))
     {
         return E_INVALIDARG;
     }

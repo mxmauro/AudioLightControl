@@ -1,4 +1,0 @@
-interface:
-  display_name: "Node5050 Build Flow"
-  short_description: "Build, flash, and monitor this ESP-IDF node"
-  default_prompt: "Use $node5050-build-flash to build, flash, or debug the AudioLightNode5050 firmware."

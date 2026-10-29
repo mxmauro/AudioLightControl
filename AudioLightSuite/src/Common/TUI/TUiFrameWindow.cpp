@@ -147,26 +147,51 @@ VOID CTUiFrameWindow::OnMouseEvent(_In_ CTUiWindowManager::MouseEvent_t &sEvent)
 
             {
                 INT iTotalCols, iTotalRows;
+                INT iMinX, iMaxX;
+                INT iMinY, iMaxY;
+                INT iFinalX, iFinalY;
                 const INT iCurrentX = m_sDragState.iCurrentX;
                 const INT iCurrentY = m_sDragState.iCurrentY;
-                const INT iOriginX = m_sDragState.iOriginX;
-                const INT iOriginY = m_sDragState.iOriginY;
                 const INT iWidth = GetWidth();
                 const INT iHeight = GetHeight();
 
                 m_lpTerminalControl->GetTerminalSize(&iTotalCols, &iTotalRows);
 
-                if (iCurrentX < 0 || iCurrentY < 0 || (iCurrentX + iWidth) > iTotalCols || (iCurrentY + iHeight) > iTotalRows)
+                iMinX = (iWidth > iTotalCols) ? (iTotalCols - iWidth) : 0;
+                iMaxX = (iWidth > iTotalCols) ? 0 : (iTotalCols - iWidth);
+                iMinY = (iHeight > iTotalRows) ? (iTotalRows - iHeight) : 0;
+                iMaxY = (iHeight > iTotalRows) ? 0 : (iTotalRows - iHeight);
+
+                iFinalX = iCurrentX;
+                iFinalY = iCurrentY;
+                if (iFinalX < iMinX)
                 {
-                    m_lpWindowManager->RelocateWindow(this, iOriginX, iOriginY);
+                    iFinalX = iMinX;
                 }
-                else
+                else if (iFinalX > iMaxX)
+                {
+                    iFinalX = iMaxX;
+                }
+                if (iFinalY < iMinY)
+                {
+                    iFinalY = iMinY;
+                }
+                else if (iFinalY > iMaxY)
+                {
+                    iFinalY = iMaxY;
+                }
+
+                if (iFinalX != iCurrentX || iFinalY != iCurrentY)
+                {
+                    m_lpWindowManager->RelocateWindow(this, iFinalX, iFinalY);
+                }
+
                 {
                     CPersistantSettings *lpPersistantSettings = dynamic_cast<CPersistantSettings *>(m_lpContentWindow);
 
                     if (lpPersistantSettings)
                     {
-                        lpPersistantSettings->SaveWindowPosition(iCurrentX, iCurrentY);
+                        lpPersistantSettings->SaveWindowPosition(iFinalX, iFinalY);
                     }
                 }
             }

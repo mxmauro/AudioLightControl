@@ -1,0 +1,60 @@
+dependencies:
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19~2
+  espressif/mdns:
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.14.1
+  idf:
+    source:
+      type: idf
+    version: 6.1.0
+  mxmauro/esp-iot-comm:
+    component_hash: 3bac23eccf91feaae414ac727dac2f7d2612c50ea01df70c1fd9882386931afd
+    dependencies:
+    - name: idf
+      version: '>=5.5.0,<7.0.0'
+    - name: espressif/cjson
+      version: ^1.7.19
+    - name: espressif/mdns
+      version: ^1.12.0
+    - git: https://github.com/mxmauro/esp-utils.git
+      name: mxmauro/esp-utils
+      version: v0.4.0
+    source:
+      git: https://github.com/mxmauro/esp-iot-comm.git
+      path: .
+      type: git
+    version: 5983b5e209d87bd4577524f03032b930ea13f4c4
+  mxmauro/esp-utils:
+    component_hash: 02132146fa0c7c7a24ed86876b10aa0ff63bcfb61313372e07cb5ca15b2d91fd
+    dependencies:
+    - name: idf
+      version: '>=5.5.0,<7.0.0'
+    source:
+      git: https://github.com/mxmauro/esp-utils.git
+      path: .
+      type: git
+    version: f395901f4cf8ad3d40611b74579ef50b1a5f3b1e
+direct_dependencies:
+- espressif/mdns
+- idf
+- mxmauro/esp-iot-comm
+- mxmauro/esp-utils
+manifest_hash: b2b962f0989b816194c69108ec0d04a408c25d60e911d01f21990415c1cf762b
+target: esp32c3
+version: 3.0.0

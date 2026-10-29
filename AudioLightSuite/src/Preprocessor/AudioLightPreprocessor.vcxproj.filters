@@ -54,6 +54,9 @@
     <ClCompile Include="..\Common\Utils\WinRegistry.cpp">
       <Filter>Source Files\Common\Utils</Filter>
     </ClCompile>
+    <ClCompile Include="..\Common\Utils\Timer.cpp">
+      <Filter>Source Files\Common\Utils</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common\Audio\AudioAnalysis.h">
@@ -75,6 +78,12 @@
       <Filter>Header Files\Common\Utils</Filter>
     </ClInclude>
     <ClInclude Include="..\Common\Utils\WinRegistry.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\ComStart.h">
+      <Filter>Header Files\Common\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Utils\Timer.h">
       <Filter>Header Files\Common\Utils</Filter>
     </ClInclude>
   </ItemGroup>

@@ -15,7 +15,7 @@ public:
     } DeviceEntry_t;
 
 public:
-    explicit CSharedManualColorControlWindow(_In_ const std::vector<CBaseIotDevice *> &vecDevices) noexcept;
+    explicit CSharedManualColorControlWindow(_In_ const std::vector<CBaseIotDevice *> &vecDevices);
     CSharedManualColorControlWindow(_In_ const CSharedManualColorControlWindow &) = delete;
     CSharedManualColorControlWindow(_Inout_ CSharedManualColorControlWindow &&) = delete;
     ~CSharedManualColorControlWindow() noexcept = default;

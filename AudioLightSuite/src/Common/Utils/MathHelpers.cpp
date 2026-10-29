@@ -2,8 +2,7 @@
 
 // -----------------------------------------------------------------------------
 
-namespace MathHelpers
-{
+namespace MathHelpers {
 
 CBiQuad CBiQuad::CreateBandPass(_In_ float fs, _In_ float fLo, _In_ float fHi)
 {

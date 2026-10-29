@@ -1,0 +1,18 @@
+# ESP-IDF Partition Table
+#
+# Notes:
+#
+#     0x0000 - 0xFFFF   Reserved / Bootloader (bootloader starts at 0x1000)
+#     0x10000 - 0x10FFF Partition table
+#     0x11000           Start of the first partition
+#     App partitions must be aligned to 64KB / 0x10000 boundaries.
+#     Data partitions must be aligned to 4 KB / 0x1000 boundaries.
+#
+#
+#   Name, Type, SubType,    Offset,  Size, Flags
+nvs,      data, nvs,              ,   20K,
+otadata,  data, ota,              ,    8K,
+phy_init, data, phy,              ,    4K,
+ota_0,    app,  ota_0,            , 1920K,
+ota_1,    app,  ota_1,            , 1920K,
+nvs_keys, data, nvs_keys,         ,    4K, encrypted

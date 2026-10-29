@@ -1,0 +1,21 @@
+[mcp_servers.svelte]
+command = "npx"
+args = ["-y", "@sveltejs/mcp"]
+
+[mcp_servers.skeleton_dev]
+command = "npx"
+args = [
+  "--allow-git=all",
+  "--yes",
+  "--package=github:mxmauro/mcp-skeleton-dev#v0.1.1",
+  "skeleton-svelte-mcp"
+]
+
+[mcp_servers.skeleton_dev.tools.search_skeleton_docs]
+approval_mode = "approve"
+
+[mcp_servers.skeleton_dev.tools.get_skeleton_section]
+approval_mode = "approve"
+
+[mcp_servers.skeleton_dev.tools.skeleton_svelte_guidance]
+approval_mode = "approve"

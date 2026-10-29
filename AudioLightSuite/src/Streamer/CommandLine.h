@@ -6,8 +6,19 @@
 
 // -----------------------------------------------------------------------------
 
+typedef enum CmdLineAudioSource_e {
+    CmdLineAudioSource_DefaultOutput,
+    CmdLineAudioSource_ProcessOutput,
+    CmdLineAudioSource_Input,
+} CmdLineAudioSource_t;
+
+// -----------------------------------------------------------------------------
+
 typedef struct CmdLimeParameters_s {
+    CmdLineAudioSource_t eAudioSource;
     DWORD dwPid;
+    BOOL bListInputDevices;
+    std::wstring strInputDeviceNameW;
     std::wstring strConfigPathW;
 } CmdLimeParameters;
 

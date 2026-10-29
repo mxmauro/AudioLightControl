@@ -1,0 +1,87 @@
+@import "tailwindcss";
+@import "@skeletonlabs/skeleton";
+@import "@skeletonlabs/skeleton-svelte";
+@import "@skeletonlabs/skeleton/themes/wintry";
+@plugin "@tailwindcss/forms";
+
+/* Skeleton Themes */
+@custom-variant dark {
+	&:where([data-mode="dark"], [data-mode="dark"] *) {
+		@slot;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		&:where([data-mode="system"], [data-mode="system"] *) {
+			@slot;
+		}
+	}
+}
+
+html {
+	scroll-behavior: smooth;
+}
+
+/* Animations */
+
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.spin-360 {
+	animation: spin 5s linear infinite; /* Shorthand */
+}
+
+html,
+body,
+#app {
+	@apply min-h-full;
+}
+
+body {
+	@apply bg-surface-50-950 text-surface-950-50;
+}
+
+input.input,
+select.select {
+	@apply w-full border-2 border-surface-400-600 bg-surface-50-950 px-3 py-1.5 text-sm/6 text-surface-950-50 shadow-sm;
+	@apply placeholder:text-surface-600-400;
+}
+
+.label > span:first-child {
+	@apply font-medium text-surface-950-50;
+}
+
+.form-actions {
+	@apply flex flex-wrap justify-end gap-3 border-t border-surface-300-700 pt-5;
+}
+
+.notice-error {
+	@apply bg-error-500 text-white;
+}
+
+.notice-success {
+	@apply bg-success-500 text-white;
+}
+
+.notice-info {
+	@apply bg-surface-700 text-white;
+}
+
+[data-scope="navigation"][data-part="trigger-anchor"][aria-current="page"] {
+	@apply preset-tonal;
+}
+
+input.input:focus,
+select.select:focus {
+	@apply border-primary-500 ring-2 ring-primary-500/40 outline-none;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+	@apply border-error-500 ring-2 ring-error-500/40;
+}

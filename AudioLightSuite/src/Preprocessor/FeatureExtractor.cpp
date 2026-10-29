@@ -28,8 +28,8 @@
 
 using Microsoft::WRL::ComPtr;
 
-static constexpr UINT32 FEATURE_ANALYSIS_RATE_MS = 100;
-static constexpr UINT32 FEATURE_FILE_FORMAT_VERSION = 2;
+static constexpr UINT32 FEATURE_ANALYSIS_RATE_MS = 50;
+static constexpr UINT32 FEATURE_FILE_FORMAT_VERSION = 4;
 static constexpr UINT32 FEATURE_MAX_BANDS = CAudioAnalyzer::BAND_COUNT;
 
 typedef struct FeatureDecodedAudio_s {
@@ -45,6 +45,22 @@ typedef struct FeatureFrame_s {
     float fHighEnergy{ 0.0f };
     float fOverallEnergy{ 0.0f };
     float fNovelty{ 0.0f };
+    float fSpectralFlux{ 0.0f };
+    float fSpectralFlux5To8{ 0.0f };
+    float fSpectralFlux8To12{ 0.0f };
+    float fSpectralFlux12To18{ 0.0f };
+    UINT32 ulSpectralBroadbandCoverage{ 0 };
+    float fSpectralEnergy5To8{ 0.0f };
+    float fSpectralEnergy8To12{ 0.0f };
+    float fSpectralEnergyUpper{ 0.0f };
+    float fSpectralFlatness{ 0.0f };
+    float fSpectralPercussiveRatio{ 0.0f };
+    float fHighFastEnvelope{ 0.0f };
+    float fHighSlowEnvelope{ 0.0f };
+    float fHighTransientStrength{ 0.0f };
+    float fSpectralAirRatio{ 0.0f };
+    float fSpectralHighToMidRatio{ 0.0f };
+    float fTrebleScore{ 0.0f };
 } FeatureFrame_t;
 
 typedef struct FeatureBeatMarker_s {
@@ -70,6 +86,8 @@ typedef struct FeatureSectionMarker_s {
 
 typedef struct FeatureAnalysisResults_s {
     UINT32 ulCadenceMs{ FEATURE_ANALYSIS_RATE_MS };
+    float fBpm{ 0.0f };
+    float fBpmConfidence{ 0.0f };
     std::vector<FeatureFrame_t> vecFrames;
     std::vector<FeatureBeatMarker_t> vecBeats;
     std::vector<FeatureSectionMarker_t> vecSections;
@@ -104,6 +122,22 @@ typedef struct FeatureFileFrame_s {
     float fHighEnergy;
     float fOverallEnergy;
     float fNovelty;
+    float fSpectralFlux;
+    float fSpectralFlux5To8;
+    float fSpectralFlux8To12;
+    float fSpectralFlux12To18;
+    UINT32 ulSpectralBroadbandCoverage;
+    float fSpectralEnergy5To8;
+    float fSpectralEnergy8To12;
+    float fSpectralEnergyUpper;
+    float fSpectralFlatness;
+    float fSpectralPercussiveRatio;
+    float fHighFastEnvelope;
+    float fHighSlowEnvelope;
+    float fHighTransientStrength;
+    float fSpectralAirRatio;
+    float fSpectralHighToMidRatio;
+    float fTrebleScore;
 } FeatureFileFrame_t;
 
 typedef struct FeatureFileBeat_s {
@@ -124,7 +158,8 @@ typedef struct FeatureFileSection_s {
 static float ConvertPcmSampleToFloat(_In_ const BYTE *lpData, _In_ UINT32 ulBitsPerSample, _In_ BOOL bFloat) noexcept;
 static HRESULT ReadContiguousAudioBuffer(_In_ IMFSample *lpSample, _Out_ std::vector<BYTE> &vecBytes) noexcept;
 static VOID NormalizeFrames(_Inout_ std::vector<FeatureFrame_t> &vecFrames) noexcept;
-static VOID DetectBeats(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ UINT32 ulCadenceHz,
+static VOID DetectBeats(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ UINT32 ulCadenceHz, _In_ float fBpm,
+                        _In_ float fBpmConfidence,
                         _Out_ std::vector<FeatureBeatMarker_t> &vecBeats) noexcept;
 static VOID DetectSections(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ UINT32 ulCadenceHz,
                            _Out_ std::vector<FeatureSectionMarker_t> &vecSections) noexcept;
@@ -355,7 +390,7 @@ static HRESULT DecodeToMonoPCM(_In_z_ LPCWSTR szInputFilePathW, _Out_ FeatureDec
 
 static HRESULT Analyze(_In_ const FeatureDecodedAudio_t &sDecodedAudio, _Out_ FeatureAnalysisResults_t &sAnalysisResults) noexcept
 {
-    CAudioAnalyzer cAudioAnalyzer;
+    std::unique_ptr<CAudioAnalyzer> cAudioAnalyzer;
     SIZE_T nSamplesPerAnalysisFrame;
     SIZE_T nAnalysisFrameCount;
     SIZE_T nAnalysisFrameIndex;
@@ -365,7 +400,16 @@ static HRESULT Analyze(_In_ const FeatureDecodedAudio_t &sDecodedAudio, _Out_ Fe
     sAnalysisResults = {};
     sAnalysisResults.ulCadenceMs = FEATURE_ANALYSIS_RATE_MS;
 
-    cAudioAnalyzer.SetFrequency((float)sDecodedAudio.ulSampleRate);
+    cAudioAnalyzer.reset(new (std::nothrow) CAudioAnalyzer());
+    if (!cAudioAnalyzer)
+    {
+        return E_OUTOFMEMORY;
+    }
+    hRes = cAudioAnalyzer->Initialize((float)sDecodedAudio.ulSampleRate);
+    if (FAILED(hRes))
+    {
+        return hRes;
+    }
 
     // Slice the full song into fixed-rate analysis frames so playback and devices can consume
     // a stable time grid later, regardless of callback sizes in the live app.
@@ -396,17 +440,40 @@ static HRESULT Analyze(_In_ const FeatureDecodedAudio_t &sDecodedAudio, _Out_ Fe
         {
             nCurrentFrameSampleCount = nSamplesPerAnalysisFrame;
         }
-        CAudioAnalyzer::Frame_t sAnalysisResult;
         FeatureFrame_t &sFrame = sAnalysisResults.vecFrames[nAnalysisFrameIndex];
 
         sFrame = {};
-        cAudioAnalyzer.Analyze(sDecodedAudio.vecMonoPcm.data() + nSampleOffset, static_cast<UINT32>(nCurrentFrameSampleCount),
-                               sAnalysisResult);
+
+        CAudioAnalyzer::Frame_t sAnalysisResult;
+        cAudioAnalyzer->Analyze(sDecodedAudio.vecMonoPcm.data() + nSampleOffset, static_cast<UINT32>(nCurrentFrameSampleCount),
+                                sAnalysisResult);
+
         memcpy(sFrame.fBands, sAnalysisResult.fBandRmsRaw, sizeof(sFrame.fBands));
         sFrame.fLowEnergy = sAnalysisResult.fLowEnergyRaw;
         sFrame.fMidEnergy = sAnalysisResult.fMidEnergyRaw;
         sFrame.fHighEnergy = sAnalysisResult.fHighEnergyRaw;
         sFrame.fOverallEnergy = (sFrame.fLowEnergy * 0.45f) + (sFrame.fMidEnergy * 0.30f) + (sFrame.fHighEnergy * 0.25f);
+        sFrame.fSpectralFlux = sAnalysisResult.fSpectralFlux;
+        sFrame.fSpectralFlux5To8 = sAnalysisResult.fSpectralFlux5To8;
+        sFrame.fSpectralFlux8To12 = sAnalysisResult.fSpectralFlux8To12;
+        sFrame.fSpectralFlux12To18 = sAnalysisResult.fSpectralFlux12To18;
+        sFrame.ulSpectralBroadbandCoverage = sAnalysisResult.ulSpectralBroadbandCoverage;
+        sFrame.fSpectralEnergy5To8 = sAnalysisResult.fSpectralEnergy5To8;
+        sFrame.fSpectralEnergy8To12 = sAnalysisResult.fSpectralEnergy8To12;
+        sFrame.fSpectralEnergyUpper = sAnalysisResult.fSpectralEnergyUpper;
+        sFrame.fSpectralFlatness = sAnalysisResult.fSpectralFlatness;
+        sFrame.fSpectralPercussiveRatio = sAnalysisResult.fSpectralPercussiveRatio;
+        sFrame.fHighFastEnvelope = sAnalysisResult.fHighFastEnvelope;
+        sFrame.fHighSlowEnvelope = sAnalysisResult.fHighSlowEnvelope;
+        sFrame.fHighTransientStrength = sAnalysisResult.fHighTransientStrength;
+        sFrame.fSpectralAirRatio = sAnalysisResult.fSpectralAirRatio;
+        sFrame.fSpectralHighToMidRatio = sAnalysisResult.fSpectralHighToMidRatio;
+        sFrame.fTrebleScore = sAnalysisResult.fTrebleScore;
+        if (sAnalysisResult.bBpmReady != FALSE)
+        {
+            sAnalysisResults.fBpm = sAnalysisResult.fBpm;
+            sAnalysisResults.fBpmConfidence = sAnalysisResult.fBpmConfidence;
+        }
 
         nAnalysisFrameIndex++;
     }
@@ -416,7 +483,8 @@ static HRESULT Analyze(_In_ const FeatureDecodedAudio_t &sDecodedAudio, _Out_ Fe
     NormalizeFrames(sAnalysisResults.vecFrames);
 
     // Derive simple song-level structure from the normalized frame stream.
-    DetectBeats(sAnalysisResults.vecFrames, sAnalysisResults.ulCadenceMs, sAnalysisResults.vecBeats);
+    DetectBeats(sAnalysisResults.vecFrames, sAnalysisResults.ulCadenceMs, sAnalysisResults.fBpm,
+                sAnalysisResults.fBpmConfidence, sAnalysisResults.vecBeats);
     DetectSections(sAnalysisResults.vecFrames, sAnalysisResults.ulCadenceMs, sAnalysisResults.vecSections);
 
     // Done
@@ -481,6 +549,22 @@ static HRESULT WriteFeatureFile(_In_z_ LPCWSTR szOutputFilePathW, _In_ const Fea
             vecFrames[i].fHighEnergy = sAnalysisResults.vecFrames[i].fHighEnergy;
             vecFrames[i].fOverallEnergy = sAnalysisResults.vecFrames[i].fOverallEnergy;
             vecFrames[i].fNovelty = sAnalysisResults.vecFrames[i].fNovelty;
+            vecFrames[i].fSpectralFlux = sAnalysisResults.vecFrames[i].fSpectralFlux;
+            vecFrames[i].fSpectralFlux5To8 = sAnalysisResults.vecFrames[i].fSpectralFlux5To8;
+            vecFrames[i].fSpectralFlux8To12 = sAnalysisResults.vecFrames[i].fSpectralFlux8To12;
+            vecFrames[i].fSpectralFlux12To18 = sAnalysisResults.vecFrames[i].fSpectralFlux12To18;
+            vecFrames[i].ulSpectralBroadbandCoverage = sAnalysisResults.vecFrames[i].ulSpectralBroadbandCoverage;
+            vecFrames[i].fSpectralEnergy5To8 = sAnalysisResults.vecFrames[i].fSpectralEnergy5To8;
+            vecFrames[i].fSpectralEnergy8To12 = sAnalysisResults.vecFrames[i].fSpectralEnergy8To12;
+            vecFrames[i].fSpectralEnergyUpper = sAnalysisResults.vecFrames[i].fSpectralEnergyUpper;
+            vecFrames[i].fSpectralFlatness = sAnalysisResults.vecFrames[i].fSpectralFlatness;
+            vecFrames[i].fSpectralPercussiveRatio = sAnalysisResults.vecFrames[i].fSpectralPercussiveRatio;
+            vecFrames[i].fHighFastEnvelope = sAnalysisResults.vecFrames[i].fHighFastEnvelope;
+            vecFrames[i].fHighSlowEnvelope = sAnalysisResults.vecFrames[i].fHighSlowEnvelope;
+            vecFrames[i].fHighTransientStrength = sAnalysisResults.vecFrames[i].fHighTransientStrength;
+            vecFrames[i].fSpectralAirRatio = sAnalysisResults.vecFrames[i].fSpectralAirRatio;
+            vecFrames[i].fSpectralHighToMidRatio = sAnalysisResults.vecFrames[i].fSpectralHighToMidRatio;
+            vecFrames[i].fTrebleScore = sAnalysisResults.vecFrames[i].fTrebleScore;
         }
 
         // Keep beat and section tables separate from per-frame data so later playback code can
@@ -631,41 +715,48 @@ static VOID NormalizeFrames(_Inout_ std::vector<FeatureFrame_t> &vecFrames) noex
     }
 }
 
-static VOID DetectBeats(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ UINT32 ulCadenceMs,
-                        _Out_ std::vector<FeatureBeatMarker_t> &vecBeats) noexcept
+static VOID DetectBeats(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ UINT32 ulCadenceMs, _In_ float fBpm,
+                        _In_ float fBpmConfidence, _Out_ std::vector<FeatureBeatMarker_t> &vecBeats) noexcept
 {
-    float fBestScore;
-    UINT32 ulBestBpm, ulMinGapFrames, ulBeatCounter;
+    float fMeanBeatStrength;
+    float fBeatStrengthVariance;
+    float fMinimumBeatStrength;
+    UINT32 ulMinGapFrames;
+    UINT32 ulBeatCounter;
 
     vecBeats.clear();
-
-    // This is intentionally simple: estimate a plausible BPM by scoring repeating low/onset
-    // patterns, then extract sparse beat markers from local peaks.
-    fBestScore = -1.0f;
-    ulBestBpm = 120;
-    for (UINT32 ulBpm = 70; ulBpm <= 180; ulBpm++)
+    if (vecFrames.size() < 5 || ulCadenceMs == 0)
     {
-        float fFramesPerBeat = 60000.0f / ((float)ulBpm * (float)ulCadenceMs);
-        float fScore = 0.0f;
-
-        for (SIZE_T i = 0; i < vecFrames.size(); i++)
-        {
-            float fPhase = fmodf((float)i, fFramesPerBeat) / fFramesPerBeat;
-            float fWeight = 1.0f - (2.0f * fabsf(fPhase - 0.5f));
-            float fBeatEnergy = (vecFrames[i].fBandOnsets[0] * 0.30f) + (vecFrames[i].fBandOnsets[1] * 0.25f) +
-                                (vecFrames[i].fBandOnsets[11] * 0.15f) + (vecFrames[i].fOverallEnergy * 0.30f);
-
-            fScore += fBeatEnergy * MathHelpers::Max(0.0f, fWeight);
-        }
-
-        if (fScore > fBestScore)
-        {
-            fBestScore = fScore;
-            ulBestBpm = ulBpm;
-        }
+        return;
     }
 
-    ulMinGapFrames = static_cast<UINT32>(30000.0f / ((float)ulBestBpm * (float)ulCadenceMs));
+    fMeanBeatStrength = 0.0f;
+    for (const FeatureFrame_t &sFrame : vecFrames)
+    {
+        fMeanBeatStrength += sFrame.fBandOnsets[0] * 0.35f + sFrame.fBandOnsets[1] * 0.25f +
+                             sFrame.fBandOnsets[10] * 0.10f + sFrame.fBandOnsets[11] * 0.10f + sFrame.fNovelty * 0.20f;
+    }
+    fMeanBeatStrength /= (float)vecFrames.size();
+
+    fBeatStrengthVariance = 0.0f;
+    for (const FeatureFrame_t &sFrame : vecFrames)
+    {
+        float fBeatStrength = sFrame.fBandOnsets[0] * 0.35f + sFrame.fBandOnsets[1] * 0.25f +
+                              sFrame.fBandOnsets[10] * 0.10f + sFrame.fBandOnsets[11] * 0.10f + sFrame.fNovelty * 0.20f;
+        float fDeviation = fBeatStrength - fMeanBeatStrength;
+
+        fBeatStrengthVariance += fDeviation * fDeviation;
+    }
+    fBeatStrengthVariance = sqrtf(fBeatStrengthVariance / (float)vecFrames.size());
+    fMinimumBeatStrength = MathHelpers::Max(0.08f, fMeanBeatStrength + fBeatStrengthVariance * 0.75f);
+
+    // The shared detector has a 12-second history and combines low-band, broadband, and spectral onsets.
+    // Short files without enough history retain a conservative 120 BPM spacing instead of reporting a false estimate.
+    if (fBpmConfidence <= 0.0f)
+    {
+        fBpm = 120.0f;
+    }
+    ulMinGapFrames = static_cast<UINT32>(27000.0f / (fBpm * (float)ulCadenceMs));
     if (ulMinGapFrames < 1)
     {
         ulMinGapFrames = 1;
@@ -674,13 +765,22 @@ static VOID DetectBeats(_In_ const std::vector<FeatureFrame_t> &vecFrames, _In_ 
     for (UINT32 i = 2; i + 2 < vecFrames.size(); i++)
     {
         float fBeatStrength = (vecFrames[i].fBandOnsets[0] * 0.35f) + (vecFrames[i].fBandOnsets[1] * 0.25f) +
-                              (vecFrames[i].fBandOnsets[11] * 0.15f) + (vecFrames[i].fNovelty * 0.25f);
+                              (vecFrames[i].fBandOnsets[10] * 0.10f) + (vecFrames[i].fBandOnsets[11] * 0.10f) +
+                              (vecFrames[i].fNovelty * 0.20f);
+        float fPreviousBeatStrength = (vecFrames[i - 1].fBandOnsets[0] * 0.35f) +
+                                      (vecFrames[i - 1].fBandOnsets[1] * 0.25f) +
+                                      (vecFrames[i - 1].fBandOnsets[10] * 0.10f) +
+                                      (vecFrames[i - 1].fBandOnsets[11] * 0.10f) + (vecFrames[i - 1].fNovelty * 0.20f);
+        float fNextBeatStrength = (vecFrames[i + 1].fBandOnsets[0] * 0.35f) +
+                                  (vecFrames[i + 1].fBandOnsets[1] * 0.25f) +
+                                  (vecFrames[i + 1].fBandOnsets[10] * 0.10f) +
+                                  (vecFrames[i + 1].fBandOnsets[11] * 0.10f) + (vecFrames[i + 1].fNovelty * 0.20f);
 
-        if (fBeatStrength < 0.18f)
+        if (fBeatStrength < fMinimumBeatStrength)
         {
             continue;
         }
-        if (fBeatStrength < vecFrames[i - 1].fNovelty || fBeatStrength < vecFrames[i + 1].fNovelty)
+        if (fBeatStrength < fPreviousBeatStrength || fBeatStrength < fNextBeatStrength)
         {
             continue;
         }

@@ -1,0 +1,12 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## Required IDF version
+  idf:
+    version: '>=6.0'
+  espressif/mdns: ^1.10.1
+  mxmauro/esp-utils:
+    git: https://github.com/mxmauro/esp-utils.git
+    version: "v0.4.0"
+  mxmauro/esp-iot-comm:
+    git: https://github.com/mxmauro/esp-iot-comm.git
+    version: "v0.9.0"

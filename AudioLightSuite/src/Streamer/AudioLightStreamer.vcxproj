@@ -101,15 +101,20 @@
     <ClCompile Include="AppConfig.cpp" />
     <ClCompile Include="AudioLightStreamer.cpp" />
     <ClCompile Include="CommandLine.cpp" />
+    <ClCompile Include="Devices\AudioLightNodeIotDevice.cpp" />
     <ClCompile Include="Devices\BaseIotDevice.cpp" />
-    <ClCompile Include="Devices\LedStrip5050.cpp" />
+    <ClCompile Include="Devices\DmxIotDevice.cpp" />
+    <ClCompile Include="Devices\GoveeStripIotDevice.cpp" />
+    <ClCompile Include="Devices\Rgb5050IotDevice.cpp" />
     <ClCompile Include="Devices\SharedManualColorControl.cpp" />
     <ClCompile Include="Engine.cpp" />
     <ClCompile Include="Monitors\AudioAnalysisMonitor.cpp" />
     <ClCompile Include="Monitors\BaseMonitor.cpp" />
-    <ClCompile Include="OutputAudioCapture.cpp" />
+    <ClCompile Include="AudioCapture.cpp" />
     <ClCompile Include="Processors\BaseAudioProcessor.cpp" />
+    <ClCompile Include="Processors\BandSpectrum.cpp" />
     <ClCompile Include="Processors\SpectrumColor.cpp" />
+    <ClCompile Include="Processors\TrebleStrobe.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Common\Audio\AudioAnalysis.cpp" />
@@ -142,19 +147,26 @@
     <ClInclude Include="..\Common\TUI\TUiFrameWindow.h" />
     <ClInclude Include="..\Common\TUI\TUiWindow.h" />
     <ClInclude Include="..\Common\TUI\TUiWindowManager.h" />
+    <ClInclude Include="..\Common\Utils\ComStart.h" />
     <ClInclude Include="..\Common\Utils\FNV.h" />
+    <ClInclude Include="..\Common\Utils\RwMutex.h" />
     <ClInclude Include="..\Common\Utils\WinsockStart.h" />
     <ClInclude Include="AppConfig.h" />
     <ClInclude Include="CommandLine.h" />
+    <ClInclude Include="Devices\AudioLightNodeIotDevice.h" />
     <ClInclude Include="Devices\BaseIotDevice.h" />
-    <ClInclude Include="Devices\LedStrip5050.h" />
+    <ClInclude Include="Devices\DmxIotDevice.h" />
+    <ClInclude Include="Devices\GoveeStripIotDevice.h" />
+    <ClInclude Include="Devices\Rgb5050IotDevice.h" />
     <ClInclude Include="Devices\SharedManualColorControl.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Monitors\AudioAnalysisMonitor.h" />
     <ClInclude Include="Monitors\BaseMonitor.h" />
-    <ClInclude Include="OutputAudioCapture.h" />
+    <ClInclude Include="AudioCapture.h" />
     <ClInclude Include="Processors\BaseAudioProcessor.h" />
+    <ClInclude Include="Processors\BandSpectrum.h" />
     <ClInclude Include="Processors\SpectrumColor.h" />
+    <ClInclude Include="Processors\TrebleStrobe.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -189,6 +201,7 @@
     <ClInclude Include="..\Common\Utils\TimedEvent.h" />
     <ClInclude Include="..\Common\Utils\Timer.h" />
     <ClInclude Include="..\Common\Utils\WinRegistry.h" />
+    <ClInclude Include="..\Common\Utils\WindowsHandle.h" />
     <ClInclude Include="..\Common\Utils\WindowsEvent.h" />
   </ItemGroup>
   <ItemGroup>

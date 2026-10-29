@@ -20,20 +20,30 @@ HRESULT ParseCmdLimeParameters(_In_z_ LPCWSTR szCmdLineW)
     std::wstring strArgW;
     HRESULT hRes;
 
+    sCmdLineParams.eAudioSource = CmdLineAudioSource_DefaultOutput;
     sCmdLineParams.dwPid = 0;
+    sCmdLineParams.bListInputDevices = FALSE;
+    sCmdLineParams.strInputDeviceNameW.clear();
     sCmdLineParams.strConfigPathW.clear();
 
     while (*szCmdLineW != 0)
     {
+        if (sCmdLineParams.bListInputDevices != FALSE)
+        {
+error_list_input_exclusive:
+            MessageBoxW(nullptr, L"Error: --list-input must be specified by itself.", L"Audio Light Streamer", MB_OK | MB_ICONERROR);
+            return E_INVALIDARG;
+        }
+
         if (wcsncmp(szCmdLineW, L"--pid", 5) == 0)
         {
             szCmdLineW += 5;
 
-            if (sCmdLineParams.dwPid != 0)
+            if (sCmdLineParams.eAudioSource != CmdLineAudioSource_DefaultOutput)
             {
-error_multiple_pid_procname:
-                MessageBoxW(nullptr, L"Error: --pid and/or --process-name parameters specified multiple times.", L"Audio Light Streamer",
-                            MB_OK | MB_ICONERROR);
+error_multiple_audio_source:
+                MessageBoxW(nullptr, L"Error: Only one of --pid, --process-name, or --input may be specified.",
+                            L"Audio Light Streamer", MB_OK | MB_ICONERROR);
                 return E_INVALIDARG;
             }
 
@@ -67,14 +77,15 @@ error_unexpected:   ErrorMessageBoxW(nullptr, L"Unexpected error while parsing p
             {
                 goto error_invalid_pid;
             }
+            sCmdLineParams.eAudioSource = CmdLineAudioSource_ProcessOutput;
         }
         else if (wcsncmp(szCmdLineW, L"--process-name", 14) == 0)
         {
             szCmdLineW += 14;
 
-            if (sCmdLineParams.dwPid != 0)
+            if (sCmdLineParams.eAudioSource != CmdLineAudioSource_DefaultOutput)
             {
-                goto error_multiple_pid_procname;
+                goto error_multiple_audio_source;
             }
 
             hRes = GetParameter(szCmdLineW, strArgW);
@@ -113,6 +124,58 @@ error_invalid_procname:
                 }
                 return hRes;
             }
+            sCmdLineParams.eAudioSource = CmdLineAudioSource_ProcessOutput;
+        }
+        else if (wcsncmp(szCmdLineW, L"--input", 7) == 0)
+        {
+            szCmdLineW += 7;
+
+            if (sCmdLineParams.eAudioSource != CmdLineAudioSource_DefaultOutput)
+            {
+                goto error_multiple_audio_source;
+            }
+            if (*szCmdLineW == L'=')
+            {
+                hRes = GetParameter(szCmdLineW, strArgW);
+                if (FAILED(hRes) || strArgW.empty())
+                {
+                    MessageBoxW(nullptr, L"Error: Invalid or missing value for --input parameter.", L"Audio Light Streamer",
+                                MB_OK | MB_ICONERROR);
+                    return FAILED(hRes) ? hRes : E_INVALIDARG;
+                }
+                sCmdLineParams.strInputDeviceNameW = std::move(strArgW);
+            }
+            else if (*szCmdLineW == L' ')
+            {
+                while (*szCmdLineW == L' ')
+                {
+                    szCmdLineW++;
+                }
+            }
+            else if (*szCmdLineW != 0)
+            {
+                MessageBoxW(nullptr, L"Error: Invalid value for --input parameter.", L"Audio Light Streamer", MB_OK | MB_ICONERROR);
+                return E_INVALIDARG;
+            }
+            sCmdLineParams.eAudioSource = CmdLineAudioSource_Input;
+        }
+        else if (wcsncmp(szCmdLineW, L"--list-input", 12) == 0)
+        {
+            szCmdLineW += 12;
+
+            if (sCmdLineParams.eAudioSource != CmdLineAudioSource_DefaultOutput || !sCmdLineParams.strConfigPathW.empty())
+            {
+                goto error_list_input_exclusive;
+            }
+            while (*szCmdLineW == L' ')
+            {
+                szCmdLineW++;
+            }
+            if (*szCmdLineW != 0)
+            {
+                goto error_list_input_exclusive;
+            }
+            sCmdLineParams.bListInputDevices = TRUE;
         }
         else if (wcsncmp(szCmdLineW, L"--config", 8) == 0)
         {
@@ -152,7 +215,7 @@ error_invalid_config:
         }
     }
 
-    if (sCmdLineParams.strConfigPathW.empty())
+    if (sCmdLineParams.bListInputDevices == FALSE && sCmdLineParams.strConfigPathW.empty())
     {
         hRes = TranslateToHresult([&]()
         {

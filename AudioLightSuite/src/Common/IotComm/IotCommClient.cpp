@@ -8,9 +8,11 @@
 #pragma warning(default : 26819)
 #include "..\Utils\Exception2HR.h"
 #include "..\Utils\RundownProtection.h"
+#include "..\Utils\Threads.h"
 #include "..\Utils\WindowsEvent.h"
 #include <windns.h>
 #include <In6addr.h>
+#include <WS2tcpip.h>
 
 #pragma comment(lib, "Dnsapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -86,12 +88,19 @@ static BOOL IsValidHostname(_In_z_ LPCWSTR szHostNameW);
 static BOOL IsValidHostnameAndPort(_In_z_ LPCWSTR szHostNameAndPortW);
 static HRESULT ExtractHostname(_In_z_ LPCWSTR szHostNameAndPortW, _Out_ std::wstring &strHostname) noexcept;
 
+static DWORD WINAPI DeferredHttpClientReleaseThreadProc(_In_ LPVOID lpParameter) noexcept;
+static VOID ReleaseHttpClientAsync(_Inout_ std::unique_ptr<CHttpClient> &cHttpClient) noexcept;
+
 static __forceinline USHORT readUint16BE(_In_reads_bytes_(2) const BYTE *p);
 static __forceinline VOID writeUint16BE(_Out_writes_bytes_(2) LPBYTE p, _In_ USHORT v);
 static __forceinline DWORD readUint32BE(_In_reads_bytes_(4) const BYTE *p);
 static __forceinline void writeUint32BE(_Out_writes_bytes_(4) LPBYTE p, _In_ DWORD v);
+static __forceinline ULONGLONG readUint64BE(_In_reads_bytes_(8) const BYTE *p);
+static __forceinline VOID writeUint64BE(_Out_writes_bytes_(8) LPBYTE p, _In_ ULONGLONG ullValue);
 
 static HRESULT Utf8BytesToWstring(_In_reads_bytes_(nStrLen) LPBYTE lpStr, _In_ SIZE_T nStrLen, _Out_ std::wstring &strOut);
+static BOOL IsValidUtf8String(_In_ const std::string &str) noexcept;
+static BOOL IsValidDmxFixtureChannelMapping(_In_ USHORT nMapping) noexcept;
 
 // -----------------------------------------------------------------------------
 
@@ -145,6 +154,7 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
     std::vector<BYTE> vecEncryptedAuth;
     std::vector<BYTE> vecWsNonce;
     BOOL bMustChangeCredentials;
+    DWORD dwMaxPacketSize{ 0 };
     BYTE aSharedSecret[CECDHKeyPair::SHARED_SECRET_SIZE];
     BYTE aSessionMasterKeyTemp[AES_KEY_LEN];
     BYTE aSalt[CSha256::HASH_BYTES];
@@ -246,7 +256,7 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
     // Set super timeout
     if (dwTimeoutMs != 0 && dwTimeoutMs != INFINITE)
     {
-        hRes = cTimedAbortThread.Start([&](_In_ CThread *)-> DWORD
+        hRes = cTimedAbortThread.Start([&](_In_ CThread &)-> void
         {
             if (hAbortEvent)
             {
@@ -266,7 +276,6 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
                     m_cLocalAbortEvent.Set();
                 }
             }
-            return 0;
         });
         if (FAILED(hRes))
         {
@@ -327,10 +336,19 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
                           j.contains("serverNonce") && j["serverNonce"].is_string() &&
                           j.contains("serverPublicKey") && j["serverPublicKey"].is_string() &&
                           j.contains("devicePublicKey") && j["devicePublicKey"].is_string() &&
-                          j.contains("deviceSignature") && j["deviceSignature"].is_string()))
+                          j.contains("deviceSignature") && j["deviceSignature"].is_string() &&
+                          j.contains("maxPacketSize") && j["maxPacketSize"].is_number_unsigned()))
                     {
                         throw IOTCOMM_E_UNEXPECTED_SERVER_RESPONSE;
                     }
+
+                    UINT64 ullMaxPacketSize = j["maxPacketSize"].get<UINT64>();
+
+                    if (ullMaxPacketSize < WS_REPLY_HEADER_LEN + CAes::GCM_TAG_LEN || ullMaxPacketSize > MAXDWORD)
+                    {
+                        throw IOTCOMM_E_UNEXPECTED_SERVER_RESPONSE;
+                    }
+                    dwMaxPacketSize = static_cast<DWORD>(ullMaxPacketSize);
 
                     strTemp = j["token"].get<std::string>();
                     hRes = Base64::Decode(strTemp.data(), strTemp.length(), FALSE, vecCookie);
@@ -592,6 +610,7 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
 
                     if (!(j.contains("wsNonce") && j["wsNonce"].is_string() &&
                           j.contains("mustChangeCredentials") && j["mustChangeCredentials"].is_boolean() &&
+                          j.contains("isAdmin") && j["isAdmin"].is_boolean() &&
                           j.contains("wsTicket") && j["wsTicket"].is_string()))
                     {
                         throw IOTCOMM_E_UNEXPECTED_SERVER_RESPONSE;
@@ -726,6 +745,7 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
                 memcpy(m_aServerBaseIV, aDerivedKey + 2 * AES_KEY_LEN + SESSION_IV_LEN, SESSION_IV_LEN);
                 memcpy(this->m_aSessionMasterKey, aSessionMasterKeyTemp, sizeof(this->m_aSessionMasterKey));
                 memcpy(m_aWsNonce, vecWsNonce.data(), NONCE_SIZE);
+                m_dwMaxPacketSize = dwMaxPacketSize;
                 hRes = TranslateToHresult([&]()
                 {
                     m_strHostNameW = szHostNameW;
@@ -735,8 +755,8 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
                     cHttpClient->WsForceClose();
                     goto done;
                 }
-                m_dwNextRxCounter = 1;
-                m_dwNextTxCounter = 1;
+                m_ullNextRxCounter = 1;
+                m_ullNextTxCounter = 1;
 
                 // Complete websocket link
                 m_cWsClient = std::move(cHttpClient);
@@ -753,7 +773,6 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
             {
                 cHttpClient->WsForceClose();
             }
-
         }
         else
         {
@@ -922,7 +941,7 @@ HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_byte
                                                 _In_ SIZE_T nPayloadLen, _Out_ std::vector<BYTE> &reply) noexcept
 {
     PendingReply_t sPendingReply = {};
-    DWORD dwTxCounter;
+    ULONGLONG ullTxCounter;
     HRESULT hRes;
 
     reply.clear();
@@ -939,18 +958,19 @@ HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_byte
         if (cAutoRundownProt.IsAcquired() && (_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) == STATE_CONNECTED)
         {
             CMutex::CAutoLock cLock(m_cMutex);
+            CMutex::CAutoLock cPendingRepliesLock(m_cPendingRepliesMutex);
 
-            dwTxCounter = GetNextTxCounter();
+            ullTxCounter = GetNextTxCounter();
             hRes = TranslateToHresult([&]
             {
-                m_mapPendingReplies.insert_or_assign(dwTxCounter, &sPendingReply);
+                m_mapPendingReplies.insert_or_assign(ullTxCounter, &sPendingReply);
             });
 
             // Try to send
             hRes = EncryptAndSend(nCmd, lpPayload, nPayloadLen);
             if (FAILED(hRes))
             {
-                m_mapPendingReplies.erase(dwTxCounter);
+                m_mapPendingReplies.erase(ullTxCounter);
                 return hRes;
             }
         }
@@ -970,7 +990,29 @@ HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_byte
         {
             break;
         }
-        ::WaitOnAddress(&sPendingReply.hRes, &hrExpected, sizeof(hrExpected), INFINITE);
+
+        if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED)
+        {
+            CMutex::CAutoLock cPendingRepliesLock(m_cPendingRepliesMutex);
+
+            hRes = _InterlockedOr(&sPendingReply.hRes, 0);
+            if (hRes == S_FALSE)
+            {
+                if (auto it = m_mapPendingReplies.find(ullTxCounter); it != m_mapPendingReplies.end() && it->second == &sPendingReply)
+                {
+                    m_mapPendingReplies.erase(it);
+                }
+
+                hRes = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                _InterlockedExchange(&sPendingReply.hRes, hRes);
+            }
+            if (hRes != S_FALSE)
+            {
+                break;
+            }
+        }
+
+        ::WaitOnAddress(&sPendingReply.hRes, &hrExpected, sizeof(hrExpected), 50);
     }
     if (FAILED(hRes))
     {
@@ -983,14 +1025,15 @@ HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_byte
     // Done
     return S_OK;
 }
-
 CIotCommClient::CCommandResult CIotCommClient::OpenUdpChannel()
 {
-    BYTE aClientUdpNonce[NONCE_SIZE];
-    BYTE aUdpSalt[CSha256::HASH_BYTES];
-    BYTE aDerivedKey[2 * AES_KEY_LEN + 2 * SESSION_IV_LEN];
-    BYTE aServerUdpNonce[NONCE_SIZE];
+    BYTE aClientUdpNonce[NONCE_SIZE]{};
+    BYTE aSessionMasterKeyLocal[AES_KEY_LEN]{};
+    BYTE aUdpSalt[CSha256::HASH_BYTES]{};
+    BYTE aDerivedKey[2 * AES_KEY_LEN + 2 * SESSION_IV_LEN]{};
+    BYTE aServerUdpNonce[NONCE_SIZE]{};
     std::vector<BYTE> vecReply;
+    std::wstring strHostNameW;
     std::wstring strHostOnlyW;
     addrinfoW sHints = {};
     PADDRINFOW lpAddrInfoW = nullptr;
@@ -1002,42 +1045,62 @@ CIotCommClient::CCommandResult CIotCommClient::OpenUdpChannel()
     CSha256 cSha256;
     HRESULT hRes;
 
-    if (FAILED(RandomBytes(aClientUdpNonce, sizeof(aClientUdpNonce))))
     {
-        return CCommandResult(E_FAIL);
-    }
+        CAutoRundownProtection cAutoRundownProt(&m_nRundownProt);
 
-    hRes = SendCommandAndWaitReply(CMD_UDP_OPEN, aClientUdpNonce, sizeof(aClientUdpNonce), vecReply);
-    if (FAILED(hRes))
-    {
-        return CCommandResult(hRes);
-    }
-    if (vecReply.size() < sizeof(DWORD) || readUint32BE(vecReply.data()) != 0)
-    {
-        return BuildCommandResultFromStandardReply(vecReply);
-    }
-    if (vecReply.size() != sizeof(DWORD) + 2 + sizeof(DWORD) + NONCE_SIZE)
-    {
-        return CCommandResult(E_INVALID_PROTOCOL_FORMAT);
-    }
-
-    nUdpPort = readUint16BE(vecReply.data() + sizeof(DWORD));
-    dwUdpConnectionIdLocal = readUint32BE(vecReply.data() + sizeof(DWORD) + 2);
-    memcpy(aServerUdpNonce, vecReply.data() + sizeof(DWORD) + 2 + sizeof(DWORD), sizeof(aServerUdpNonce));
-    if (nUdpPort == 0 || dwUdpConnectionIdLocal == 0)
-    {
-        return CCommandResult(E_INVALID_PROTOCOL_FORMAT);
-    }
-
-    {
-        CMutex::CAutoLock cLock(m_cMutex);
-
-        if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED || m_strHostNameW.empty())
+        if (!cAutoRundownProt.IsAcquired())
         {
             return CCommandResult(E_NOT_SET);
         }
 
-        hRes = ExtractHostname(m_strHostNameW.c_str(), strHostOnlyW);
+        if (FAILED(RandomBytes(aClientUdpNonce, sizeof(aClientUdpNonce))))
+        {
+            return CCommandResult(E_FAIL);
+        }
+
+        hRes = SendCommandAndWaitReply(CMD_UDP_OPEN, aClientUdpNonce, sizeof(aClientUdpNonce), vecReply);
+        if (FAILED(hRes))
+        {
+            return CCommandResult(hRes);
+        }
+        if (vecReply.size() < sizeof(DWORD) || readUint32BE(vecReply.data()) != 0)
+        {
+            return BuildCommandResultFromStandardReply(vecReply);
+        }
+        if (vecReply.size() != sizeof(DWORD) + 2 + sizeof(DWORD) + NONCE_SIZE)
+        {
+            return CCommandResult(E_INVALID_PROTOCOL_FORMAT);
+        }
+
+        nUdpPort = readUint16BE(vecReply.data() + sizeof(DWORD));
+        dwUdpConnectionIdLocal = readUint32BE(vecReply.data() + sizeof(DWORD) + 2);
+        memcpy(aServerUdpNonce, vecReply.data() + sizeof(DWORD) + 2 + sizeof(DWORD), sizeof(aServerUdpNonce));
+        if (nUdpPort == 0 || dwUdpConnectionIdLocal == 0)
+        {
+            return CCommandResult(E_INVALID_PROTOCOL_FORMAT);
+        }
+
+        {
+            CMutex::CAutoLock cLock(m_cMutex);
+
+            if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED || m_strHostNameW.empty())
+            {
+                return CCommandResult(E_NOT_SET);
+            }
+
+            hRes = TranslateToHresult([&]()
+            {
+                strHostNameW = m_strHostNameW;
+            });
+            if (FAILED(hRes))
+            {
+                return CCommandResult(hRes);
+            }
+
+            memcpy(aSessionMasterKeyLocal, m_aSessionMasterKey, sizeof(aSessionMasterKeyLocal));
+        }
+
+        hRes = ExtractHostname(strHostNameW.c_str(), strHostOnlyW);
         if (FAILED(hRes))
         {
             return CCommandResult(hRes);
@@ -1055,7 +1118,7 @@ CIotCommClient::CCommandResult CIotCommClient::OpenUdpChannel()
         }
         memcpy(aUdpSalt, cSha256.GetHash(), sizeof(aUdpSalt));
 
-        hRes = Hkdf::Sha256DeriveKey(m_aSessionMasterKey, sizeof(m_aSessionMasterKey), aUdpSalt, sizeof(aUdpSalt), aUdpTransportInfo,
+        hRes = Hkdf::Sha256DeriveKey(aSessionMasterKeyLocal, sizeof(aSessionMasterKeyLocal), aUdpSalt, sizeof(aUdpSalt), aUdpTransportInfo,
                                      sizeof(aUdpTransportInfo), aDerivedKey, sizeof(aDerivedKey));
         if (FAILED(hRes))
         {
@@ -1084,19 +1147,29 @@ CIotCommClient::CCommandResult CIotCommClient::OpenUdpChannel()
             goto done;
         }
 
-        ResetUdpState();
-
-        hRes = m_cUdpClientAes.SetKey(aDerivedKey, AES_KEY_LEN);
-        if (FAILED(hRes))
         {
-            goto done;
-        }
+            CMutex::CAutoLock cLock(m_cMutex);
 
-        m_hUdpSocket = hUdpSocketLocal;
-        hUdpSocketLocal = INVALID_SOCKET;
-        m_dwUdpConnectionId = dwUdpConnectionIdLocal;
-        m_dwNextUdpTxCounter = 1;
-        memcpy(m_aUdpClientBaseIV, aDerivedKey + 2 * AES_KEY_LEN, SESSION_IV_LEN);
+            if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED)
+            {
+                hRes = E_NOT_SET;
+                goto done;
+            }
+
+            ResetUdpState();
+
+            hRes = m_cUdpClientAes.SetKey(aDerivedKey, AES_KEY_LEN);
+            if (FAILED(hRes))
+            {
+                goto done;
+            }
+
+            m_hUdpSocket = hUdpSocketLocal;
+            hUdpSocketLocal = INVALID_SOCKET;
+            m_dwUdpConnectionId = dwUdpConnectionIdLocal;
+            m_ullNextUdpTxCounter = 1;
+            memcpy(m_aUdpClientBaseIV, aDerivedKey + 2 * AES_KEY_LEN, SESSION_IV_LEN);
+        }
     }
 
     hRes = S_OK;
@@ -1111,6 +1184,7 @@ done:
         ::closesocket(hUdpSocketLocal);
     }
     memset(aClientUdpNonce, 0, sizeof(aClientUdpNonce));
+    memset(aSessionMasterKeyLocal, 0, sizeof(aSessionMasterKeyLocal));
     memset(aUdpSalt, 0, sizeof(aUdpSalt));
     memset(aDerivedKey, 0, sizeof(aDerivedKey));
     memset(aServerUdpNonce, 0, sizeof(aServerUdpNonce));
@@ -1131,7 +1205,7 @@ HRESULT CIotCommClient::SendUdpCommand(_In_ USHORT nCmd, _In_reads_bytes_(nPaylo
         {
             CMutex::CAutoLock cLock(m_cMutex);
 
-            if (m_hUdpSocket == INVALID_SOCKET || m_dwUdpConnectionId == 0 || m_dwNextUdpTxCounter == 0)
+            if (m_hUdpSocket == INVALID_SOCKET || m_dwUdpConnectionId == 0 || m_ullNextUdpTxCounter == 0)
             {
                 return E_NOT_SET;
             }
@@ -1293,8 +1367,9 @@ CIotCommClient::CCommandResult CIotCommClient::ChangeUserCredentialsCommand(_In_
 {
     CECDsaKeyPair cECDsa;
     CSha256 cSha256;
-    BYTE aSignature[CECDsaKeyPair::SIGNATURE_SIZE];
-    BYTE aHash[CSha256::HASH_BYTES];
+    BYTE aSignature[CECDsaKeyPair::SIGNATURE_SIZE]{};
+    BYTE aHash[CSha256::HASH_BYTES]{};
+    BYTE aWsNonceLocal[NONCE_SIZE]{};
     LONG nOrigConnectionID;
     std::vector<BYTE> vecPayload;
     std::vector<BYTE> vecReply;
@@ -1316,60 +1391,85 @@ CIotCommClient::CCommandResult CIotCommClient::ChangeUserCredentialsCommand(_In_
         return CCommandResult(E_INVALIDARG);
     }
 
-    // Store connection info for later use
-    if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED)
     {
-        return CCommandResult(E_NOT_SET);
-    }
-    nOrigConnectionID = _InterlockedOr(&m_nConnectionID, 0);
+        CAutoRundownProtection cAutoRundownProt(&m_nRundownProt);
 
-    // t = "ws-chgcreds-v1" || publicKey || ws_nonce
-    cSha256.Init();
-    cSha256.Update(aWsChangeCredsV1, sizeof(aWsChangeCredsV1));
-    cSha256.Update(lpNewPublicKey, nNewPublicKeyLen);
-    cSha256.Update(m_aWsNonce, sizeof(m_aWsNonce));
-    hRes = cSha256.Finalize();
-    // Sign T (SHA-256 is applied internally)
-    if (SUCCEEDED(hRes))
-    {
-        memcpy(aHash, cSha256.GetHash(), CSha256::HASH_BYTES);
-        hRes = cECDsa.Sign(aHash, aSignature);
-    }
-
-    // Create payload
-    hRes = TranslateToHresult([&]()
-    {
-        vecPayload.insert(vecPayload.end(), aSignature, aSignature + sizeof(aSignature));
-        vecPayload.insert(vecPayload.end(), reinterpret_cast<const BYTE *>(lpNewPublicKey),
-                          reinterpret_cast<const BYTE *>(lpNewPublicKey) + nNewPublicKeyLen);
-    });
-    if (FAILED(hRes))
-    {
-        return CCommandResult(hRes);
-    }
-
-    // Run command
-    hRes = SendCommandAndWaitReply(CMD_CHANGE_USER_CREDENTIALS, vecPayload.data(), vecPayload.size(), vecReply);
-    if (FAILED(hRes))
-    {
-        return CCommandResult(hRes);
-    }
-
-    // On success, mark the credentials change as completed
-    cCmdResult = BuildCommandResultFromStandardReply(vecReply);
-    if (cCmdResult.Succeeded() && cCmdResult.Code() == 0)
-    {
-        if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) == STATE_CONNECTED &&
-            nOrigConnectionID == _InterlockedRead(&m_nConnectionID))
+        if (!cAutoRundownProt.IsAcquired())
         {
-            _InterlockedAnd(&m_nState, ~STATE_FLAG_MUST_CHANGE_CREDS);
+            return CCommandResult(E_NOT_SET);
+        }
+
+        {
+            CMutex::CAutoLock cLock(m_cMutex);
+
+            if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) != STATE_CONNECTED)
+            {
+                return CCommandResult(E_NOT_SET);
+            }
+
+            nOrigConnectionID = _InterlockedOr(&m_nConnectionID, 0);
+            memcpy(aWsNonceLocal, m_aWsNonce, sizeof(aWsNonceLocal));
+        }
+
+        // t = "ws-chgcreds-v1" || publicKey || ws_nonce
+        cSha256.Init();
+        cSha256.Update(aWsChangeCredsV1, sizeof(aWsChangeCredsV1));
+        cSha256.Update(lpNewPublicKey, nNewPublicKeyLen);
+        cSha256.Update(aWsNonceLocal, sizeof(aWsNonceLocal));
+        hRes = cSha256.Finalize();
+        // Sign T (SHA-256 is applied internally)
+        if (SUCCEEDED(hRes))
+        {
+            memcpy(aHash, cSha256.GetHash(), CSha256::HASH_BYTES);
+            hRes = cECDsa.Sign(aHash, aSignature);
+        }
+        if (FAILED(hRes))
+        {
+            cCmdResult = CCommandResult(hRes);
+            goto done;
+        }
+
+        // Create payload
+        hRes = TranslateToHresult([&]()
+        {
+            vecPayload.insert(vecPayload.end(), aSignature, aSignature + sizeof(aSignature));
+            vecPayload.insert(vecPayload.end(), reinterpret_cast<const BYTE *>(lpNewPublicKey),
+                              reinterpret_cast<const BYTE *>(lpNewPublicKey) + nNewPublicKeyLen);
+        });
+        if (FAILED(hRes))
+        {
+            cCmdResult = CCommandResult(hRes);
+            goto done;
+        }
+
+        // Run command
+        hRes = SendCommandAndWaitReply(CMD_CHANGE_USER_CREDENTIALS, vecPayload.data(), vecPayload.size(), vecReply);
+        if (FAILED(hRes))
+        {
+            cCmdResult = CCommandResult(hRes);
+            goto done;
+        }
+
+        // On success, mark the credentials change as completed
+        cCmdResult = BuildCommandResultFromStandardReply(vecReply);
+        if (cCmdResult.Succeeded() && cCmdResult.Code() == 0)
+        {
+            CMutex::CAutoLock cLock(m_cMutex);
+
+            if ((_InterlockedRead(&m_nState) & STATE_CONNECTION_MASK) == STATE_CONNECTED &&
+                nOrigConnectionID == _InterlockedRead(&m_nConnectionID))
+            {
+                _InterlockedAnd(&m_nState, ~STATE_FLAG_MUST_CHANGE_CREDS);
+            }
         }
     }
 
-    // Done
+done:
+    memset(aSignature, 0, sizeof(aSignature));
+    memset(aHash, 0, sizeof(aHash));
+    memset(aWsNonceLocal, 0, sizeof(aWsNonceLocal));
     return cCmdResult;
 }
-
 CIotCommClient::CCommandResult CIotCommClient::SetHostNameCommand(_In_z_ LPCSTR szHostNameA)
 {
     SIZE_T nHostNameLen;
@@ -1409,6 +1509,72 @@ CIotCommClient::CCommandResult CIotCommClient::SetHostNameCommand(_In_z_ LPCSTR 
     return BuildCommandResultFromStandardReply(vecReply);
 }
 
+CIotCommClient::CDeviceConfigCommandResult CIotCommClient::GetDeviceConfigCommand()
+{
+    static const BYTE uEmptyPayload = 0;
+    std::vector<BYTE> vecReply;
+    HRESULT hRes;
+
+    hRes = SendCommandAndWaitReply(CMD_GET_DEVICE_CONFIG, &uEmptyPayload, 0, vecReply);
+    if (FAILED(hRes))
+    {
+        return CDeviceConfigCommandResult(hRes);
+    }
+
+    return BuildDeviceConfigCommandResult(vecReply);
+}
+
+CIotCommClient::CCommandResult CIotCommClient::SetDeviceConfigCommand(_In_ const DeviceConfig_t &sConfig)
+{
+    std::vector<BYTE> vecPayload;
+    std::vector<BYTE> vecReply;
+    HRESULT hRes;
+
+    hRes = BuildDeviceConfigPayload(sConfig, vecPayload);
+    if (FAILED(hRes))
+    {
+        return CCommandResult(hRes);
+    }
+
+    hRes = SendCommandAndWaitReply(CMD_SET_DEVICE_CONFIG, vecPayload.data(), vecPayload.size(), vecReply);
+    if (FAILED(hRes))
+    {
+        return CCommandResult(hRes);
+    }
+
+    return BuildCommandResultFromStandardReply(vecReply);
+}
+
+HRESULT CIotCommClient::SetRawDmxChannelDataCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
+                                                    _In_ SIZE_T nDataLen)
+{
+    std::vector<BYTE> vecPayload;
+    HRESULT hRes;
+
+    hRes = BuildRawDmxChannelDataPayload(nStartChannel, lpData, nDataLen, vecPayload);
+    if (FAILED(hRes))
+    {
+        return hRes;
+    }
+
+    return SendCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+}
+
+HRESULT CIotCommClient::SetRawDmxChannelDataUdpCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
+                                                       _In_ SIZE_T nDataLen)
+{
+    std::vector<BYTE> vecPayload;
+    HRESULT hRes;
+
+    hRes = BuildRawDmxChannelDataPayload(nStartChannel, lpData, nDataLen, vecPayload);
+    if (FAILED(hRes))
+    {
+        return hRes;
+    }
+
+    return SendUdpCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+}
+
 CIotCommClient::CCommandResult CIotCommClient::BuildCommandResultFromStandardReply(_In_ std::vector<BYTE> &reply)
 {
     LPBYTE lpData;
@@ -1443,6 +1609,332 @@ CIotCommClient::CCommandResult CIotCommClient::BuildCommandResultFromStandardRep
     return CCommandResult(S_OK, dwCode, strMessage.c_str());
 }
 
+CIotCommClient::CDeviceConfigCommandResult CIotCommClient::BuildDeviceConfigCommandResult(_In_ const std::vector<BYTE> &reply)
+{
+    static constexpr SIZE_T DEVICE_CONFIG_REPLY_HEADER_LEN = sizeof(BYTE) + sizeof(DWORD);
+    static constexpr SIZE_T DEVICE_CONFIG_HEADER_LEN = DEVICE_CONFIG_REPLY_HEADER_LEN + sizeof(BYTE) + sizeof(BYTE);
+    static constexpr SIZE_T RGB5050_PAYLOAD_LEN = sizeof(BYTE) * 4;
+    static constexpr USHORT DMX_MAX_CHANNELS = 128;
+    static constexpr SIZE_T DMX_MAX_FIXTURES = 16;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_TYPE_LEN = 32;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_CHANNELS_COUNT = 32;
+    static constexpr BYTE GPIO_MAX = 127;
+    CDeviceConfigCommandResult cResult(S_OK);
+    const BYTE *lpPayload;
+    SIZE_T nPayloadLen, nOffset;
+    SIZE_T nFixturesCount;
+
+    if (reply.size() < DEVICE_CONFIG_HEADER_LEN)
+    {
+        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+    }
+
+    cResult.m_nReplyVersion = reply[0];
+    cResult.m_dwCommandFlags = readUint32BE(reply.data() + 1);
+    cResult.m_nConfigVersion = reply[DEVICE_CONFIG_REPLY_HEADER_LEN];
+    cResult.m_nOutputControllerType = static_cast<OutputControllerType_t>(reply[DEVICE_CONFIG_REPLY_HEADER_LEN + 1]);
+    if (cResult.m_nReplyVersion != 1 || cResult.m_nConfigVersion != 1)
+    {
+        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+    }
+
+    lpPayload = reply.data() + DEVICE_CONFIG_HEADER_LEN;
+    nPayloadLen = reply.size() - DEVICE_CONFIG_HEADER_LEN;
+
+    switch (cResult.m_nOutputControllerType)
+    {
+        case OutputControllerTypeNone:
+            if (nPayloadLen != 0)
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+            cResult.m_bKnownControllerType = TRUE;
+            break;
+
+        case OutputControllerTypeRgb5050:
+            if (nPayloadLen != RGB5050_PAYLOAD_LEN)
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+
+            try
+            {
+                cResult.m_ptrRgb5050 = std::make_unique<CDeviceConfigCommandResult::DeviceConfigRgb5050_t>();
+            }
+            catch (const std::bad_alloc &)
+            {
+                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
+            }
+
+            cResult.m_ptrRgb5050->nRedGpioPin = lpPayload[0];
+            cResult.m_ptrRgb5050->nGreenGpioPin = lpPayload[1];
+            cResult.m_ptrRgb5050->nBlueGpioPin = lpPayload[2];
+            if (cResult.m_ptrRgb5050->nRedGpioPin > GPIO_MAX || cResult.m_ptrRgb5050->nGreenGpioPin > GPIO_MAX ||
+                cResult.m_ptrRgb5050->nBlueGpioPin > GPIO_MAX || lpPayload[3] > 1 ||
+                cResult.m_ptrRgb5050->nRedGpioPin == cResult.m_ptrRgb5050->nGreenGpioPin ||
+                cResult.m_ptrRgb5050->nRedGpioPin == cResult.m_ptrRgb5050->nBlueGpioPin ||
+                cResult.m_ptrRgb5050->nGreenGpioPin == cResult.m_ptrRgb5050->nBlueGpioPin)
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+            cResult.m_ptrRgb5050->bActiveLow = lpPayload[3] ? TRUE : FALSE;
+            cResult.m_bKnownControllerType = TRUE;
+            break;
+
+        case OutputControllerTypeDmx:
+            if (nPayloadLen < sizeof(USHORT) + (sizeof(BYTE) * 2))
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+
+            try
+            {
+                cResult.m_ptrDmx = std::make_unique<CDeviceConfigCommandResult::DeviceConfigDmx_t>();
+            }
+            catch (const std::bad_alloc &)
+            {
+                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
+            }
+
+            cResult.m_ptrDmx->nUniverseSize = readUint16BE(lpPayload);
+            cResult.m_ptrDmx->nTxGpioPin = lpPayload[2];
+            nFixturesCount = static_cast<SIZE_T>(lpPayload[3]);
+            nOffset = 4;
+
+            if (cResult.m_ptrDmx->nUniverseSize != DMX_MAX_CHANNELS || cResult.m_ptrDmx->nTxGpioPin > GPIO_MAX ||
+                nFixturesCount > DMX_MAX_FIXTURES)
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+
+            try
+            {
+                BYTE aUsedChannels[(DMX_MAX_CHANNELS + 7) / 8] = {};
+
+                cResult.m_ptrDmx->vecFixtures.reserve(nFixturesCount);
+
+                for (SIZE_T i = 0; i < nFixturesCount; i++)
+                {
+                    CDeviceConfigCommandResult::DeviceConfigDmxFixture_t sFixture;
+                    SIZE_T nTypeLen, nColoringCount;
+
+                    for (nTypeLen = 0; (nOffset + nTypeLen) < nPayloadLen && lpPayload[nOffset + nTypeLen] != 0; nTypeLen++);
+                    if ((nOffset + nTypeLen) >= nPayloadLen || nTypeLen == 0 || nTypeLen > DMX_FIXTURE_MAX_TYPE_LEN)
+                    {
+                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+
+                    sFixture.strFixtureType.assign(reinterpret_cast<const char *>(lpPayload + nOffset), nTypeLen);
+                    if (!IsValidUtf8String(sFixture.strFixtureType))
+                    {
+                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    nOffset += nTypeLen + 1;
+
+                    if ((nPayloadLen - nOffset) < (sizeof(USHORT) + sizeof(BYTE)))
+                    {
+                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+
+                    sFixture.nStartChannel = readUint16BE(lpPayload + nOffset);
+                    nOffset += sizeof(USHORT);
+
+                    nColoringCount = lpPayload[nOffset];
+                    nOffset += sizeof(BYTE);
+
+                    if (nColoringCount == 0 || nColoringCount > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
+                        sFixture.nStartChannel > DMX_MAX_CHANNELS - nColoringCount + 1 ||
+                        (nPayloadLen - nOffset) < (nColoringCount * sizeof(USHORT)))
+                    {
+                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+
+                    sFixture.vecColoringEntries.reserve(nColoringCount);
+                    for (SIZE_T j = 0; j < nColoringCount; j++)
+                    {
+                        USHORT nColoringEntry = readUint16BE(lpPayload + nOffset);
+                        USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + j - 1);
+
+                        if ((!IsValidDmxFixtureChannelMapping(nColoringEntry)) ||
+                            (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
+                        {
+                            return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                        }
+
+                        aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
+                        sFixture.vecColoringEntries.push_back(nColoringEntry);
+                        nOffset += sizeof(USHORT);
+                    }
+
+                    cResult.m_ptrDmx->vecFixtures.push_back(std::move(sFixture));
+                }
+            }
+            catch (const std::bad_alloc &)
+            {
+                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
+            }
+
+            if (nOffset != nPayloadLen)
+            {
+                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+            cResult.m_bKnownControllerType = TRUE;
+            break;
+    }
+
+    return cResult;
+}
+
+HRESULT CIotCommClient::BuildDeviceConfigPayload(_In_ const DeviceConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept
+{
+    static constexpr BYTE CONFIG_VERSION = 1;
+    static constexpr USHORT DMX_MAX_CHANNELS = 128;
+    static constexpr SIZE_T DMX_MAX_FIXTURES = 16;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_TYPE_LEN = 32;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_CHANNELS_COUNT = 32;
+    static constexpr BYTE GPIO_MAX = 127;
+    HRESULT hRes;
+
+    payload.clear();
+
+    if (sConfig.nVersion != CONFIG_VERSION)
+    {
+        return E_INVALIDARG;
+    }
+
+    switch (sConfig.nOutputControllerType)
+    {
+        case OutputControllerTypeNone:
+            break;
+
+        case OutputControllerTypeDmx:
+            if (sConfig.sDmx.nUniverseSize != DMX_MAX_CHANNELS || sConfig.sDmx.nTxGpioPin > GPIO_MAX ||
+                sConfig.sDmx.vecFixtures.size() > DMX_MAX_FIXTURES)
+            {
+                return E_INVALIDARG;
+            }
+            {
+                BYTE aUsedChannels[(DMX_MAX_CHANNELS + 7) / 8] = {};
+
+                for (const CDeviceConfigCommandResult::DeviceConfigDmxFixture_t &sFixture : sConfig.sDmx.vecFixtures)
+                {
+                    if (sFixture.strFixtureType.empty() || sFixture.strFixtureType.size() > DMX_FIXTURE_MAX_TYPE_LEN ||
+                        sFixture.strFixtureType.find('\0') != std::string::npos || sFixture.vecColoringEntries.empty() ||
+                        sFixture.vecColoringEntries.size() > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
+                        sFixture.nStartChannel > DMX_MAX_CHANNELS - sFixture.vecColoringEntries.size() + 1 ||
+                        !IsValidUtf8String(sFixture.strFixtureType))
+                    {
+                        return E_INVALIDARG;
+                    }
+
+                    for (SIZE_T i = 0; i < sFixture.vecColoringEntries.size(); i++)
+                    {
+                        USHORT nColoringEntry = sFixture.vecColoringEntries[i];
+                        USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + i - 1);
+
+                        if ((!IsValidDmxFixtureChannelMapping(nColoringEntry)) ||
+                            (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
+                        {
+                            return E_INVALIDARG;
+                        }
+
+                        aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
+                    }
+                }
+            }
+            break;
+
+        case OutputControllerTypeRgb5050:
+            if (sConfig.sRgb5050.nRedGpioPin > GPIO_MAX || sConfig.sRgb5050.nGreenGpioPin > GPIO_MAX ||
+                sConfig.sRgb5050.nBlueGpioPin > GPIO_MAX || sConfig.sRgb5050.nRedGpioPin == sConfig.sRgb5050.nGreenGpioPin ||
+                sConfig.sRgb5050.nRedGpioPin == sConfig.sRgb5050.nBlueGpioPin ||
+                sConfig.sRgb5050.nGreenGpioPin == sConfig.sRgb5050.nBlueGpioPin)
+            {
+                return E_INVALIDARG;
+            }
+            break;
+
+        default:
+            return E_INVALIDARG;
+    }
+
+    hRes = TranslateToHresult([&]()
+    {
+        payload.push_back(sConfig.nVersion);
+        payload.push_back(static_cast<BYTE>(sConfig.nOutputControllerType));
+
+        switch (sConfig.nOutputControllerType)
+        {
+            case OutputControllerTypeDmx:
+                payload.resize(payload.size() + sizeof(USHORT) + (sizeof(BYTE) * 2));
+                writeUint16BE(payload.data() + 2, sConfig.sDmx.nUniverseSize);
+                payload[4] = sConfig.sDmx.nTxGpioPin;
+                payload[5] = static_cast<BYTE>(sConfig.sDmx.vecFixtures.size());
+
+                for (const CDeviceConfigCommandResult::DeviceConfigDmxFixture_t &sFixture : sConfig.sDmx.vecFixtures)
+                {
+                    payload.insert(payload.end(), sFixture.strFixtureType.begin(), sFixture.strFixtureType.end());
+                    payload.push_back(0);
+                    payload.resize(payload.size() + sizeof(USHORT) + sizeof(BYTE));
+                    writeUint16BE(payload.data() + payload.size() - sizeof(USHORT) - sizeof(BYTE), sFixture.nStartChannel);
+                    payload.back() = static_cast<BYTE>(sFixture.vecColoringEntries.size());
+                    for (USHORT nColoringEntry : sFixture.vecColoringEntries)
+                    {
+                        SIZE_T nOffset = payload.size();
+
+                        payload.resize(nOffset + sizeof(USHORT));
+                        writeUint16BE(payload.data() + nOffset, nColoringEntry);
+                    }
+                }
+                break;
+
+            case OutputControllerTypeRgb5050:
+                payload.resize(payload.size() + (sizeof(BYTE) * 4));
+                payload[2] = sConfig.sRgb5050.nRedGpioPin;
+                payload[3] = sConfig.sRgb5050.nGreenGpioPin;
+                payload[4] = sConfig.sRgb5050.nBlueGpioPin;
+                payload[5] = sConfig.sRgb5050.bActiveLow ? 1 : 0;
+                break;
+        }
+    });
+    if (FAILED(hRes))
+    {
+        return hRes;
+    }
+
+    return (payload.size() <= MAX_MSG_SIZE) ? S_OK : HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+}
+
+HRESULT CIotCommClient::BuildRawDmxChannelDataPayload(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
+                                                      _In_ SIZE_T nDataLen, _Out_ std::vector<BYTE> &payload) noexcept
+{
+    static constexpr USHORT DMX_UNIVERSE_SIZE = 128;
+    HRESULT hRes;
+
+    payload.clear();
+
+    if ((!lpData) || nDataLen == 0 || nStartChannel == 0 || nStartChannel > DMX_UNIVERSE_SIZE ||
+        nDataLen > DMX_UNIVERSE_SIZE || (static_cast<SIZE_T>(nStartChannel) + nDataLen - 1) > DMX_UNIVERSE_SIZE)
+    {
+        return E_INVALIDARG;
+    }
+
+    hRes = TranslateToHresult([&]()
+    {
+        payload.resize((sizeof(USHORT) * 2) + nDataLen);
+    });
+    if (FAILED(hRes))
+    {
+        return hRes;
+    }
+
+    writeUint16BE(payload.data(), nStartChannel);
+    writeUint16BE(payload.data() + sizeof(USHORT), static_cast<USHORT>(nDataLen));
+    memcpy(payload.data() + (sizeof(USHORT) * 2), lpData, nDataLen);
+
+    return S_OK;
+}
+
 LONG CIotCommClient::SetConnectionState(_In_ LONG nConnState) noexcept
 {
     LONG initVal, newVal;
@@ -1460,13 +1952,16 @@ LONG CIotCommClient::SetConnectionState(_In_ LONG nConnState) noexcept
 VOID CIotCommClient::OnWsMessage(_In_ const BYTE *lpData, _In_ SIZE_T nDataLen, _In_ BOOL bIsText)
 {
     BYTE nVersion;
-    USHORT nCmd;
-    DWORD dwReplyCounter = 0, dwRxCounter = 0;
+    USHORT nCmd = 0;
+    BYTE uFlags;
+    ULONGLONG ullReplyCounter = 0, ullRxCounter = 0;
     BYTE aIV[SESSION_IV_LEN];
+    BYTE uEmptyPlaintext = 0;
     USHORT nIntErrCode = 0;
     LPCSTR szIntErrReasonA = nullptr;
     std::vector<BYTE> vecInput;
     HRESULT hRes = S_OK;
+    SIZE_T nHeaderLen = WS_COMMON_HEADER_LEN;
 
     {
         CAutoRundownProtection cAutoRundownProt(&m_nRundownProt);
@@ -1483,14 +1978,14 @@ VOID CIotCommClient::OnWsMessage(_In_ const BYTE *lpData, _In_ SIZE_T nDataLen, 
             }
 
             // Check message size
-            if (nDataLen < PACKET_HEADER_LEN)
+            if (nDataLen < WS_COMMON_HEADER_LEN + CAes::GCM_TAG_LEN)
             {
                 // Packet too short to contain header + tag
                 nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
                 szIntErrReasonA = "Protocol error: packet too short";
                 goto done;
             }
-            if (nDataLen > PACKET_HEADER_LEN + MAX_MSG_SIZE + CAes::GCM_TAG_LEN)
+            if (nDataLen > m_dwMaxPacketSize || nDataLen > WS_REPLY_HEADER_LEN + MAX_MSG_SIZE + CAes::GCM_TAG_LEN)
             {
                 // Packet too short to contain header + tag
                 nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
@@ -1498,37 +1993,54 @@ VOID CIotCommClient::OnWsMessage(_In_ const BYTE *lpData, _In_ SIZE_T nDataLen, 
                 goto done;
             }
 
-            // Extract header and validate version and RX counter (a.k.a. nonce)
-            // Header { v(1) | cmd(2) | filler(1) | replyCounter(4) | counter(4) | filler(4) }
+            // Header { v(1) | cmd(2) | flags(1) | counter(8) | replyCounter(8)? }
             nVersion = lpData[0];
             nCmd = readUint16BE(lpData + 1);
-            dwReplyCounter = readUint32BE(lpData + 4);
-            dwRxCounter = readUint32BE(lpData + 8);
+            uFlags = lpData[3];
+            ullRxCounter = readUint64BE(lpData + 4);
 
             if (nVersion == VERSION)
             {
+                if ((uFlags & ~PACKET_FLAG_REPLY) != 0)
+                {
+                    nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
+                    szIntErrReasonA = "Protocol error: invalid packet flags";
+                    goto done;
+                }
+                if ((uFlags & PACKET_FLAG_REPLY) != 0)
+                {
+                    nHeaderLen = WS_REPLY_HEADER_LEN;
+                    if (nDataLen < nHeaderLen + CAes::GCM_TAG_LEN)
+                    {
+                        nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
+                        szIntErrReasonA = "Protocol error: truncated reply header";
+                        goto done;
+                    }
+                    ullReplyCounter = readUint64BE(lpData + WS_COMMON_HEADER_LEN);
+                }
+
                 CMutex::CAutoLock cLock(m_cMutex);
 
-                if (dwRxCounter != m_dwNextRxCounter)
+                if (ullRxCounter == MAXULONGLONG || ullRxCounter != m_ullNextRxCounter)
                 {
                     // Invalid RX counter
                     nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
                     szIntErrReasonA = "Protocol error: RX counter mismatch";
                     goto done_in_lock;
                 }
-                m_dwNextRxCounter += 1;
+                m_ullNextRxCounter += 1;
 
                 // Build IV
                 memcpy(aIV, m_aServerBaseIV, SESSION_IV_LEN);
-                for (SIZE_T i = 0; i < 4; i++)
+                for (SIZE_T i = 0; i < sizeof(ullRxCounter); i++)
                 {
-                    aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((dwRxCounter >> (i << 3)) & 0xFF);
+                    aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((ullRxCounter >> (i << 3)) & 0xFF);
                 }
 
                 // Prepare buffer
                 hRes = TranslateToHresult([&]()
                 {
-                    vecInput.resize(nDataLen - PACKET_HEADER_LEN - CAes::GCM_TAG_LEN);
+                    vecInput.resize(nDataLen - nHeaderLen - CAes::GCM_TAG_LEN);
                 });
                 if (FAILED(hRes))
                 {
@@ -1538,8 +2050,8 @@ VOID CIotCommClient::OnWsMessage(_In_ const BYTE *lpData, _In_ SIZE_T nDataLen, 
                 }
 
                 // Try to decrypt
-                hRes = m_cServerAes.Decrypt(lpData + PACKET_HEADER_LEN, nDataLen - PACKET_HEADER_LEN, aIV, SESSION_IV_LEN, nullptr, 0,
-                                          vecInput.data());
+                hRes = m_cServerAes.Decrypt(lpData + nHeaderLen, nDataLen - nHeaderLen, aIV, SESSION_IV_LEN, lpData, nHeaderLen,
+                                           vecInput.empty() ? &uEmptyPlaintext : vecInput.data());
                 if (hRes == S_FALSE)
                 {
                     nIntErrCode = WINHTTP_WEB_SOCKET_INVALID_PAYLOAD_CLOSE_STATUS;
@@ -1556,9 +2068,9 @@ VOID CIotCommClient::OnWsMessage(_In_ const BYTE *lpData, _In_ SIZE_T nDataLen, 
                 }
 
                 // If it is a reply, then try to match it with a pending reply
-                if (dwReplyCounter != 0)
+                if (ullReplyCounter != 0)
                 {
-                    OnCommandReply(nCmd, vecInput, dwReplyCounter);
+                    OnCommandReply(nCmd, vecInput, ullReplyCounter);
                 }
 done_in_lock:;
             }
@@ -1578,7 +2090,7 @@ done:
         }
 
         // Delivery of server commands is done outside of the mutex to avoid potential deadlocks with user callbacks
-        if (nIntErrCode == 0 && dwReplyCounter == 0)
+        if (nIntErrCode == 0 && ullReplyCounter == 0)
         {
             OnServerCommand(nCmd, vecInput.data(), vecInput.size());
         }
@@ -1587,7 +2099,8 @@ done:
     // If an error happened, notify the user
     if (nIntErrCode != 0)
     {
-        CallCloseCallbackAndCleanup(nIntErrCode, szIntErrReasonA, hRes);
+        NotifyClose(nIntErrCode, szIntErrReasonA, hRes);
+        Cleanup();
     }
 
     // Cleanup
@@ -1598,21 +2111,21 @@ done:
     }
 }
 
-VOID CIotCommClient::OnWsClose(_In_ USHORT nCode, _In_z_ LPCSTR szReasonA)
+VOID CIotCommClient::OnWsClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA)
 {
-    CallCloseCallbackAndCleanup(nCode, szReasonA, S_OK);
+    NotifyClose(nCode, szReasonA, S_OK);
 }
 
 VOID CIotCommClient::OnWsError(_In_ HRESULT hRes, _In_ BOOL bIsRead)
 {
-    CallCloseCallbackAndCleanup(WINHTTP_WEB_SOCKET_SERVER_ERROR_CLOSE_STATUS,
-                                bIsRead ? "Comm error: Read failed" : "Comm error: Write failed",
-                                hRes);
+    NotifyClose(WINHTTP_WEB_SOCKET_SERVER_ERROR_CLOSE_STATUS,
+                bIsRead ? "Comm error: Read failed" : "Comm error: Write failed",
+                hRes);
 }
 
-DWORD CIotCommClient::GetNextTxCounter() const
+ULONGLONG CIotCommClient::GetNextTxCounter() const
 {
-    return m_dwNextTxCounter;
+    return m_ullNextTxCounter;
 }
 
 HRESULT CIotCommClient::EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_(nDataLen) _In_ LPCVOID lpData, _In_ SIZE_T nDataLen)
@@ -1622,56 +2135,63 @@ HRESULT CIotCommClient::EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_(nDataL
     HRESULT hRes;
 
     _ASSERT(lpData);
-    _ASSERT(nDataLen > 0);
-
     // Check data size
     if (nDataLen > MAX_MSG_SIZE)
     {
         return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
     }
+    if (m_dwMaxPacketSize < WS_COMMON_HEADER_LEN + CAes::GCM_TAG_LEN ||
+        nDataLen > m_dwMaxPacketSize - WS_COMMON_HEADER_LEN - CAes::GCM_TAG_LEN)
+    {
+        return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+    }
 
     // Prepare output buffer
+    if (m_ullNextTxCounter == MAXULONGLONG)
+    {
+        return E_UNEXPECTED;
+    }
+
     hRes = TranslateToHresult([&]()
     {
-        m_vecOutput.resize(PACKET_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN);
+        m_vecOutput.resize(WS_COMMON_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN);
     });
     if (FAILED(hRes))
     {
         return hRes;
     }
 
-    // Header { v(1) | cmd(2) | filler(1) | replyCounter(4) | counter(4) | filler(4) }
+    // Header { v(1) | cmd(2) | flags(1) | counter(8) }
     lpHeader = m_vecOutput.data();
     lpHeader[0] = VERSION; // v
     writeUint16BE(lpHeader + 1, nCmd); //cmd
-    lpHeader[3] = 0; //filler1
-    writeUint32BE(lpHeader + 4, 0); //reply counter
-    writeUint32BE(lpHeader + 8, m_dwNextTxCounter); // counter
-    writeUint32BE(lpHeader + 12, 0); // filler2
+    lpHeader[3] = 0; // flags
+    writeUint64BE(lpHeader + 4, m_ullNextTxCounter); // counter
 
     // Build IV
     memcpy(aIV, m_aClientBaseIV, SESSION_IV_LEN);
-    for (SIZE_T i = 0; i < 4; i++)
+    for (SIZE_T i = 0; i < sizeof(m_ullNextTxCounter); i++)
     {
-        aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((m_dwNextTxCounter >> (i << 3)) & 0xFF);
+        aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((m_ullNextTxCounter >> (i << 3)) & 0xFF);
     }
 
     // Encrypt data
-    hRes = m_cClientAes.Encrypt(lpData, nDataLen, aIV, SESSION_IV_LEN, nullptr, 0, m_vecOutput.data() + PACKET_HEADER_LEN);
+    hRes = m_cClientAes.Encrypt(lpData, nDataLen, aIV, SESSION_IV_LEN, lpHeader, WS_COMMON_HEADER_LEN,
+                                 m_vecOutput.data() + WS_COMMON_HEADER_LEN);
     if (FAILED(hRes))
     {
         return hRes;
     }
 
     // Send it
-    hRes = m_cWsClient->WsSend(m_vecOutput.data(), PACKET_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN, FALSE);
+    hRes = m_cWsClient->WsSend(m_vecOutput.data(), WS_COMMON_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN, FALSE);
     if (FAILED(hRes))
     {
         return hRes;
     }
 
     // Increment write counter
-    m_dwNextTxCounter += 1;
+    m_ullNextTxCounter += 1;
 
     // Done
     return S_OK;
@@ -1685,20 +2205,27 @@ HRESULT CIotCommClient::EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_(nDa
     HRESULT hRes;
 
     _ASSERT(lpData);
-    _ASSERT(nDataLen > 0);
-
     if (nDataLen > MAX_MSG_SIZE)
     {
         return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
     }
-    if (m_hUdpSocket == INVALID_SOCKET || m_dwUdpConnectionId == 0 || m_dwNextUdpTxCounter == 0)
+    if (m_dwMaxPacketSize < UDP_PACKET_HEADER_LEN + CAes::GCM_TAG_LEN ||
+        nDataLen > m_dwMaxPacketSize - UDP_PACKET_HEADER_LEN - CAes::GCM_TAG_LEN)
+    {
+        return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+    }
+    if (m_hUdpSocket == INVALID_SOCKET || m_dwUdpConnectionId == 0 || m_ullNextUdpTxCounter == 0)
     {
         return E_NOT_SET;
+    }
+    if (m_ullNextUdpTxCounter == MAXULONGLONG)
+    {
+        return E_UNEXPECTED;
     }
 
     hRes = TranslateToHresult([&]()
     {
-        m_vecUdpOutput.resize(PACKET_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN);
+        m_vecUdpOutput.resize(UDP_PACKET_HEADER_LEN + nDataLen + CAes::GCM_TAG_LEN);
     });
     if (FAILED(hRes))
     {
@@ -1706,20 +2233,20 @@ HRESULT CIotCommClient::EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_(nDa
     }
 
     lpHeader = m_vecUdpOutput.data();
-    lpHeader[0] = VERSION;
-    writeUint16BE(lpHeader + 1, nCmd);
-    lpHeader[3] = 0;
-    writeUint32BE(lpHeader + 4, m_dwUdpConnectionId);
-    writeUint32BE(lpHeader + 8, m_dwNextUdpTxCounter);
-    writeUint32BE(lpHeader + 12, 0);
+    writeUint32BE(lpHeader, m_dwUdpConnectionId);
+    lpHeader[4] = VERSION;
+    writeUint16BE(lpHeader + 5, nCmd);
+    lpHeader[7] = 0;
+    writeUint64BE(lpHeader + 8, m_ullNextUdpTxCounter);
 
     memcpy(aIV, m_aUdpClientBaseIV, SESSION_IV_LEN);
-    for (SIZE_T i = 0; i < 4; i++)
+    for (SIZE_T i = 0; i < sizeof(m_ullNextUdpTxCounter); i++)
     {
-        aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((m_dwNextUdpTxCounter >> (i << 3)) & 0xFF);
+        aIV[SESSION_IV_LEN - i - 1] ^= (BYTE)((m_ullNextUdpTxCounter >> (i << 3)) & 0xFF);
     }
 
-    hRes = m_cUdpClientAes.Encrypt(lpData, nDataLen, aIV, SESSION_IV_LEN, nullptr, 0, m_vecUdpOutput.data() + PACKET_HEADER_LEN);
+    hRes = m_cUdpClientAes.Encrypt(lpData, nDataLen, aIV, SESSION_IV_LEN, lpHeader, UDP_PACKET_HEADER_LEN,
+                                    m_vecUdpOutput.data() + UDP_PACKET_HEADER_LEN);
     if (FAILED(hRes))
     {
         return hRes;
@@ -1735,15 +2262,15 @@ HRESULT CIotCommClient::EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_(nDa
         return HRESULT_FROM_WIN32(ERROR_WRITE_FAULT);
     }
 
-    m_dwNextUdpTxCounter += 1;
+    m_ullNextUdpTxCounter += 1;
     return S_OK;
 }
 
-VOID CIotCommClient::OnCommandReply(_In_ USHORT nCmd, _Inout_ std::vector<BYTE> &vecInput, _In_ DWORD dwReplyCounter)
+VOID CIotCommClient::OnCommandReply(_In_ USHORT nCmd, _Inout_ std::vector<BYTE> &vecInput, _In_ ULONGLONG ullReplyCounter)
 {
     CMutex::CAutoLock cPendingRepliesLock(m_cPendingRepliesMutex);
 
-    if (auto it = m_mapPendingReplies.find(dwReplyCounter); it != m_mapPendingReplies.end())
+    if (auto it = m_mapPendingReplies.find(ullReplyCounter); it != m_mapPendingReplies.end())
     {
         PendingReply_t *lpPendingReply = it->second;
 
@@ -1823,7 +2350,7 @@ VOID CIotCommClient::ResetUdpState() noexcept
         ::closesocket(m_hUdpSocket);
         m_hUdpSocket = INVALID_SOCKET;
     }
-    m_dwNextUdpTxCounter = 0;
+    m_ullNextUdpTxCounter = 0;
     m_dwUdpConnectionId = 0;
     m_cUdpClientAes.Reset();
     memset(m_aUdpClientBaseIV, 0, sizeof(m_aUdpClientBaseIV));
@@ -1833,9 +2360,10 @@ VOID CIotCommClient::ResetUdpState() noexcept
         m_vecUdpOutput.clear();
     }
 }
-
 BOOL CIotCommClient::Cleanup()
 {
+    std::unique_ptr<CHttpClient> cWsClient;
+
     if (SetConnectionState(STATE_CLEANING_UP) == STATE_CLEANING_UP)
     {
         return FALSE; // Cleanup already in progress
@@ -1847,10 +2375,11 @@ BOOL CIotCommClient::Cleanup()
     if (m_cWsClient)
     {
         m_cWsClient->WsForceClose();
-        m_cWsClient.reset();
+        cWsClient = std::move(m_cWsClient);
     }
-    m_dwNextRxCounter = 0;
-    m_dwNextTxCounter = 0;
+    m_ullNextRxCounter = 0;
+    m_ullNextTxCounter = 0;
+    m_dwMaxPacketSize = 0;
     m_cClientAes.Reset();
     m_cServerAes.Reset();
     ResetUdpState();
@@ -1869,6 +2398,8 @@ BOOL CIotCommClient::Cleanup()
 
     _InterlockedExchange(&m_nState, 0);
 
+    ReleaseHttpClientAsync(cWsClient);
+
     // Done
     return TRUE;
 }
@@ -1881,10 +2412,17 @@ VOID CIotCommClient::WaitForCleanupCompletion()
     }
 }
 
-VOID CIotCommClient::CallCloseCallbackAndCleanup(_In_ USHORT nCode, _In_z_ LPCSTR szReasonA, _In_ HRESULT hRes)
+VOID CIotCommClient::NotifyClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA, _In_ HRESULT hRes)
 {
+    LPCSTR szCloseReasonA;
+
     if ((_InterlockedOr(&m_nState, STATE_FLAG_WS_CLOSE_OR_ERROR_CB_CALLED) & STATE_FLAG_WS_CLOSE_OR_ERROR_CB_CALLED) == 0)
     {
+        szCloseReasonA = szReasonA ? szReasonA : "";
+        SetConnectionState(0);
+        CancelAllWaitingReplies();
+        FulfillAllWaitingCloses(nCode, szCloseReasonA, hRes);
+
         CReaderWriterMutex::CAutoSharedLock cLock(m_cCbRwMutex);
 
         if (m_cCloseCallback)
@@ -1892,8 +2430,42 @@ VOID CIotCommClient::CallCloseCallbackAndCleanup(_In_ USHORT nCode, _In_z_ LPCST
             m_cCloseCallback(nCode, szReasonA, hRes);
         }
     }
+}
 
-    Cleanup();
+// -----------------------------------------------------------------------------
+
+static DWORD WINAPI DeferredHttpClientReleaseThreadProc(_In_ LPVOID lpParameter) noexcept
+{
+    CHttpClient *lpHttpClient;
+
+    lpHttpClient = reinterpret_cast<CHttpClient *>(lpParameter);
+    delete lpHttpClient;
+
+    return 0;
+}
+
+static VOID ReleaseHttpClientAsync(_Inout_ std::unique_ptr<CHttpClient> &cHttpClient) noexcept
+{
+    CHttpClient *lpHttpClient;
+    HANDLE hThread;
+
+    lpHttpClient = cHttpClient.release();
+    if (!lpHttpClient)
+    {
+        return;
+    }
+
+    // Destruction may block waiting for WinHTTP handle-closing callbacks.
+    // Keep that wait out of the reconnect path after callbacks have been cleared.
+    hThread = ::CreateThread(nullptr, 0, DeferredHttpClientReleaseThreadProc, lpHttpClient, 0, nullptr);
+    if (hThread)
+    {
+        ::CloseHandle(hThread);
+    }
+    else
+    {
+        delete lpHttpClient;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -2084,6 +2656,44 @@ static __forceinline void writeUint32BE(_Out_writes_bytes_(4) LPBYTE p, _In_ DWO
     p[1] = (BYTE)((v >> 16) & 0xFF);
     p[2] = (BYTE)((v >>  8) & 0xFF);
     p[3] = (BYTE)( v        & 0xFF);
+}
+
+static __forceinline ULONGLONG readUint64BE(_In_reads_bytes_(8) const BYTE *p)
+{
+    ULONGLONG ullValue = 0;
+
+    for (SIZE_T i = 0; i < sizeof(ullValue); i++)
+    {
+        ullValue = (ullValue << 8) | p[i];
+    }
+
+    return ullValue;
+}
+
+static __forceinline VOID writeUint64BE(_Out_writes_bytes_(8) LPBYTE p, _In_ ULONGLONG ullValue)
+{
+    for (SIZE_T i = 0; i < sizeof(ullValue); i++)
+    {
+        p[sizeof(ullValue) - i - 1] = static_cast<BYTE>(ullValue & 0xFF);
+        ullValue >>= 8;
+    }
+}
+
+static BOOL IsValidUtf8String(_In_ const std::string &str) noexcept
+{
+    if (str.empty() || str.size() > static_cast<SIZE_T>(INT_MAX))
+    {
+        return FALSE;
+    }
+
+    return (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), static_cast<int>(str.size()), nullptr, 0) > 0) ?
+           TRUE : FALSE;
+}
+
+static BOOL IsValidDmxFixtureChannelMapping(_In_ USHORT nMapping) noexcept
+{
+    return (nMapping <= 0x00FF || (nMapping >= CIotCommClient::DmxFixtureChannelMappingDimmer &&
+                                   nMapping <= CIotCommClient::DmxFixtureChannelMappingStrobe)) ? TRUE : FALSE;
 }
 
 static HRESULT Utf8BytesToWstring(_In_reads_bytes_(nStrLen) LPBYTE lpStr, _In_ SIZE_T nStrLen, _Out_ std::wstring &strOut)

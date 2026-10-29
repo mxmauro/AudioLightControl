@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLightNode Feature Flow"
+  short_description: "Change commands, lifecycle, and DMX behavior"
+  default_prompt: "Use $audiolightnode-feature-workflow to modify AudioLightNode firmware behavior safely."

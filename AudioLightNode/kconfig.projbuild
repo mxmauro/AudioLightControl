@@ -1,0 +1,15 @@
+mainmenu "AudioLight Node configuration"
+
+    config USE_ONBOARD_LED_GPIO
+        bool "Use the onboard LED"
+        default n
+        help
+            This option enables the onboard LED GPIO.
+
+    config ONBOARD_LED_GPIO_PIN
+        int "Onboard LED GPIO pin"
+        depends on USE_ONBOARD_LED_GPIO
+        help
+            GPIO pin number for the onboard LED.
+        range 0 31
+        default 8

@@ -3,13 +3,15 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <functional>
+#include <thread>
+#include <system_error>
 
 // -----------------------------------------------------------------------------
 
 class CThread
 {
 public:
-    using ThreadRoutine = std::function<DWORD(_In_ CThread *lpThread)>;
+    using ThreadRoutine = std::function<void(_In_ CThread &thread)>;
 
     CThread() noexcept = default;
     CThread(_In_ const CThread &) = delete;
@@ -22,7 +24,7 @@ public:
     CThread &operator=(_In_ const CThread &) = delete;
     CThread &operator=(_Inout_ CThread &&) = delete;
 
-    HRESULT Start(_In_ ThreadRoutine cThreadRoutine, _In_opt_ BOOL bPaused = FALSE) noexcept
+    HRESULT Start(_In_ ThreadRoutine cThreadRoutine) noexcept
     {
         HRESULT hRes;
 
@@ -32,8 +34,6 @@ public:
         }
         Stop();
 
-        m_cThreadRoutine = std::move(cThreadRoutine);
-
         m_hThreadExitEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!m_hThreadExitEvent)
         {
@@ -41,102 +41,53 @@ public:
             Stop();
             return hRes;
         }
-        m_hThread = ::CreateThread(nullptr, 0, CThread::ThreadProc, this, (bPaused != FALSE) ? CREATE_SUSPENDED : 0, &m_dwTid);
-        if (!m_hThread)
+
+        try
         {
-            hRes = HRESULT_FROM_WIN32(::GetLastError());
+            cThreadRoutine = std::move(cThreadRoutine);
+            m_thread = std::thread([this, cThreadRoutine]()
+            {
+                cThreadRoutine(*this);
+                ::SetEvent(m_hThreadExitEvent);
+            });
+        }
+        catch (const std::system_error &ex)
+        {
             Stop();
-            return hRes;
+            return (ex.code().value() == std::_RESOURCE_UNAVAILABLE_TRY_AGAIN) ? E_OUTOFMEMORY : E_FAIL;
+        }
+        catch (const std::bad_alloc &)
+        {
+            Stop();
+            return E_OUTOFMEMORY;
         }
 
         // Done
         return S_OK;
     };
 
-    VOID Wait() noexcept
-    {
-        if (m_hThread)
-        {
-            ::WaitForSingleObject(m_hThread, INFINITE);
-        }
-    };
-
     VOID Stop() noexcept
     {
-        if (m_hThread)
+        if (m_thread.joinable())
         {
             ::SetEvent(m_hThreadExitEvent);
-            ::WaitForSingleObject(m_hThread, INFINITE);
-            ::CloseHandle(m_hThread);
-            m_hThread = nullptr;
+            m_thread.join();
         }
         if (m_hThreadExitEvent)
         {
             ::CloseHandle(m_hThreadExitEvent);
             m_hThreadExitEvent = nullptr;
         }
-        m_dwTid = 0;
-        m_cThreadRoutine = nullptr;
-    };
-
-    VOID Kill() noexcept
-    {
-        if (m_hThread)
-        {
-#pragma warning(suppress : 6258)
-            ::TerminateThread(m_hThread, ERROR_OPERATION_ABORTED);
-            ::CloseHandle(m_hThread);
-            m_hThread = nullptr;
-        }
-        if (m_hThreadExitEvent)
-        {
-            ::CloseHandle(m_hThreadExitEvent);
-            m_hThreadExitEvent = nullptr;
-        }
-        m_dwTid = 0;
-        m_cThreadRoutine = nullptr;
-    };
-
-    VOID StopAsync() noexcept
-    {
-        if (m_hThread)
-        {
-            ::SetEvent(m_hThreadExitEvent);
-        }
-    };
-
-    VOID Resume() noexcept
-    {
-        if (m_hThread)
-        {
-            ::ResumeThread(m_hThread);
-        }
-    };
-
-    VOID Detach() noexcept
-    {
-        if (m_hThread)
-        {
-            ::CloseHandle(m_hThread);
-            m_hThread = nullptr;
-        }
-        if (m_hThreadExitEvent)
-        {
-            ::CloseHandle(m_hThreadExitEvent);
-            m_hThreadExitEvent = nullptr;
-        }
-        m_dwTid = 0;
-        m_cThreadRoutine = nullptr;
     };
 
     DWORD GetThreadId() const noexcept
     {
-        return m_dwTid;
+        return (m_thread.joinable()) ? ::GetThreadId(m_thread.native_handle()) : 0;
     };
 
     HANDLE GetThreadHandle() const noexcept
     {
-        return m_hThread;
+        return (m_thread.joinable()) ? m_thread.native_handle() : nullptr;
     };
 
     HANDLE GetExitEvent() const noexcept
@@ -174,21 +125,6 @@ public:
     };
 
 private:
-    static DWORD WINAPI ThreadProc(_In_ LPVOID lpThreadParam)
-    {
-        CThread *lpThread = reinterpret_cast<CThread *>(lpThreadParam);
-        ThreadRoutine cThreadRoutine = lpThread->m_cThreadRoutine;
-        HANDLE hThreadExitEvent = lpThread->m_hThreadExitEvent;
-        DWORD dwExitCode;
-
-        dwExitCode = cThreadRoutine(lpThread);
-        ::SetEvent(hThreadExitEvent);
-        return dwExitCode;
-    };
-
-private:
-    HANDLE m_hThread{ nullptr };
+    mutable std::thread m_thread;
     HANDLE m_hThreadExitEvent{ nullptr };
-    DWORD m_dwTid{ 0 };
-    ThreadRoutine m_cThreadRoutine;
 };

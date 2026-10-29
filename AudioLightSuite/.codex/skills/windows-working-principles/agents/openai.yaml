@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows Working Principles"
+  short_description: "Engineering guidance for Windows C++"
+  default_prompt: "Use $windows-working-principles to plan this Windows C++ change."

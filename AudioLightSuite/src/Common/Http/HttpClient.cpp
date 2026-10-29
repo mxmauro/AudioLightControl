@@ -2,7 +2,6 @@
 #include "..\Utils\Exception2HR.h"
 #include "..\Utils\RundownProtection.h"
 #include <Mstcpip.h>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -68,6 +67,11 @@ CHttpClient::CHttpClient(_Inout_ CHttpClient &&other) noexcept
 {
     if (this != &other)
     {
+        // WinHTTP callbacks capture the object address in the request context.
+        // Quiesce the source before transferring ownership so no callback can target the old object.
+        other.Cleanup(TRUE);
+        other.WaitForCleanupCompletion();
+
         m_hSession = other.m_hSession;
         other.m_hSession = nullptr;
         m_hConnect = other.m_hConnect;
@@ -111,6 +115,13 @@ CHttpClient& CHttpClient::operator=(_Inout_ CHttpClient &&other) noexcept
 {
     if (this != &other)
     {
+        // WinHTTP callbacks capture the object address in the request context.
+        // Quiesce both objects before transferring ownership to avoid leaking or misrouting callbacks.
+        Cleanup(FALSE);
+        WaitForCleanupCompletion();
+        other.Cleanup(TRUE);
+        other.WaitForCleanupCompletion();
+
         m_hSession = other.m_hSession;
         other.m_hSession = nullptr;
         m_hConnect = other.m_hConnect;
@@ -208,18 +219,22 @@ HRESULT CHttpClient::DoRequest(_In_ RequestParams_t &sRequestParams) noexcept
     // Find and extract agent header, if any provided
     hRes = TranslateToHresult([&]()
     {
-        for (auto it = aRequestHeaders.begin(); it != aRequestHeaders.end(); ++it)
+        for (auto it = aRequestHeaders.begin(); it != aRequestHeaders.end();)
         {
             if (strAgentHeader.empty() && _wcsicmp(it->first.c_str(), L"Agent") == 0)
             {
                 strAgentHeader = std::move(it->second);
-                aRequestHeaders.erase(it);
+                it = aRequestHeaders.erase(it);
+                continue;
             }
             if (strAcceptHeader.empty() && _wcsicmp(it->first.c_str(), L"Accept") == 0)
             {
                 strAcceptHeader = std::move(it->second);
-                aRequestHeaders.erase(it);
+                it = aRequestHeaders.erase(it);
+                continue;
             }
+
+            ++it;
         }
     });
     if (FAILED(hRes))
@@ -256,6 +271,8 @@ HRESULT CHttpClient::DoRequest(_In_ RequestParams_t &sRequestParams) noexcept
     RundownProt_Initialize(&m_nRundownProt);
 
     {
+        // Request-owned mutable state below is intentionally updated by WinHTTP callbacks while DoRequest() is active.
+        // m_cMutex excludes competing public request owners; it is not used to re-serialize the callback path.
         CAutoRundownProtection cAutoRundownProt(&m_nRundownProt);
 
         if (!cAutoRundownProt.IsAcquired())
@@ -449,6 +466,8 @@ HRESULT CHttpClient::DoRequest(_In_ RequestParams_t &sRequestParams) noexcept
             goto done;
         }
 
+        // After WinHttpSendRequest() hands off to WinHTTP, callbacks populate the request-owned response state and then
+        // signal m_hRequestCompletedEvent. DoRequest() only consumes that state after the wait finishes.
         // Wait for request to complete
         hEvents[0] = m_hRequestCompletedEvent;
         hEvents[1] = sRequestParams.hAbortEvent;
@@ -654,6 +673,10 @@ HRESULT CHttpClient::WsClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA) noe
 {
     DWORD dwReasonLen;
     HINTERNET hWebSocketLocal = nullptr;
+    WsClosedCallback cWsClosedCallback;
+    CHAR szCloseReasonCopyA[MAX_CLOSE_REASON_LEN + 1]{};
+    BOOL bCallCloseCb = FALSE;
+    LONG nPrevStateMask;
 
     dwReasonLen = (DWORD)strlen(szReasonA ? szReasonA : "");
     if (dwReasonLen == 0)
@@ -673,10 +696,20 @@ HRESULT CHttpClient::WsClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA) noe
             return E_NOT_VALID_STATE;
         }
 
-        if ((_InterlockedOr(&m_nStateMask, STATE_MASK_SOCKET_CLOSE_CALLED | STATE_MASK_WS_CLOSE_OR_ERROR_CB_CALLED) &
-             STATE_MASK_SOCKET_CLOSE_CALLED) == 0)
+        nPrevStateMask = _InterlockedOr(&m_nStateMask, STATE_MASK_SOCKET_CLOSE_CALLED | STATE_MASK_WS_CLOSE_OR_ERROR_CB_CALLED);
+        if ((nPrevStateMask & STATE_MASK_SOCKET_CLOSE_CALLED) == 0)
         {
             hWebSocketLocal = m_hWebSocket;
+
+            if ((nPrevStateMask & STATE_MASK_WS_CLOSE_OR_ERROR_CB_CALLED) == 0 && m_cWsClosedCallback)
+            {
+                cWsClosedCallback = m_cWsClosedCallback;
+                if (szReasonA)
+                {
+                    strcpy_s(szCloseReasonCopyA, szReasonA);
+                }
+                bCallCloseCb = TRUE;
+            }
         }
     }
 
@@ -686,6 +719,11 @@ HRESULT CHttpClient::WsClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA) noe
     }
 
     Cleanup(FALSE);
+
+    if (bCallCloseCb != FALSE && cWsClosedCallback)
+    {
+        cWsClosedCallback(nCode, szReasonA ? szCloseReasonCopyA : nullptr);
+    }
 
     // Done
     return S_OK;
@@ -847,6 +885,8 @@ VOID CHttpClient::OnHandleClosingCallback(_In_ HINTERNET hInternet) noexcept
 VOID CHttpClient::AsyncCallback(_In_ HINTERNET hInternet, _In_ DWORD dwInternetStatus, _In_ LPVOID lpvStatusInformation,
                                 _In_ DWORD dwStatusInformationLength, _Inout_ DelayedCallCallback_t *lpDcc) noexcept
 {
+    // WinHTTP callback completion for the active request is treated as serialized here. The callback path is therefore
+    // the request-side owner of m_dwStatusCode, m_aResponseHeaders, m_cResponseBody, m_aRxBuffer, and websocket RX state.
     CAutoRundownProtection cAutoRundownProt(&m_nRundownProt);
     HRESULT hRes;
 
@@ -959,6 +999,8 @@ HRESULT CHttpClient::OnResponseHeadersAvailable() noexcept
     DWORD dwSize;
     HRESULT hRes;
 
+    // Callback-owned response snapshot update for the in-flight request.
+    // DoRequest() reads the published values only after CompleteRequest() signals completion.
     // Get status code
     dwSize = sizeof(_dwStatusCode);
     if (!::WinHttpQueryHeaders(m_hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
@@ -1038,7 +1080,7 @@ HRESULT CHttpClient::OnResponseDataRead(_In_ DWORD dwBytesRead) noexcept
         return S_OK;
     }
 
-    // Append to response body
+    // Callback-owned append into the request response buffer.
     return TranslateToHresult([&]()
     {
         if (!m_cResponseBody)

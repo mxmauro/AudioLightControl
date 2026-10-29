@@ -550,6 +550,7 @@ LRESULT CTUiWindowManager::HandleCreate(_In_ HWND hWnd, _In_ WPARAM wParam, _In_
     // Create terminal
     sTerminalConfig.iRows = lpCreateParams->lpInitParams->iRows;
     sTerminalConfig.iCols = lpCreateParams->lpInitParams->iCols;
+    sTerminalConfig.crDefaultBackground = RGB(0U, 0U, 0U);
     lpCreateParams->hRes = GuiTerminal::Control::Create(hWnd, sTerminalConfig, &m_lpGuiTerminal);
     if (FAILED(lpCreateParams->hRes))
     {
@@ -758,7 +759,7 @@ LRESULT CTUiWindowManager::HandleMouseEvent(_In_ UINT uMessage, _In_ WPARAM wPar
         hTargetRegion = nullptr;
 
         // Try to locate hit region
-        hRegion = m_lpGuiTerminal->GetLastRegion();
+        hRegion = m_lpGuiTerminal->GetFirstRegion();
         while (hRegion)
         {
             m_lpGuiTerminal->ConvertToRegionCoordinates(hRegion, sEvent.iCol, sEvent.iRow, &iLocalCol, &iLocalRow);
@@ -771,12 +772,12 @@ LRESULT CTUiWindowManager::HandleMouseEvent(_In_ UINT uMessage, _In_ WPARAM wPar
                     hTargetRegion = hRegion;
 
                     // Go down and restart
-                    hRegion = m_lpGuiTerminal->GetChildLastRegion(hRegion);
+                    hRegion = m_lpGuiTerminal->GetChildFirstRegion(hRegion);
                     continue;
                 }
             }
 
-            hRegion = m_lpGuiTerminal->GetPreviousRegion(hRegion);
+            hRegion = m_lpGuiTerminal->GetNextRegion(hRegion);
         }
     }
 

@@ -3,11 +3,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "..\Processors\BaseAudioProcessor.h"
-#include "IotComm\IotCommClient.h"
 #include "TUI\TUiWindow.h"
 #include "Utils\PersistantSettings.h"
-#include "Utils\Threads.h"
-#include "Utils\WindowsEvent.h"
+#include "Utils\Mutex.h"
 #include <memory>
 #include <vector>
 
@@ -33,20 +31,17 @@ typedef struct ManualColorAction_s {
 class CBaseIotDevice : public CTUiWindow, public CPersistantSettings
 {
 protected:
-    CBaseIotDevice() noexcept;
+    CBaseIotDevice(_In_ const CAudioProcessors &cAudioProcessors) noexcept;
     CBaseIotDevice(_In_ const CBaseIotDevice &) = delete;
     CBaseIotDevice(_Inout_ CBaseIotDevice &&) = delete;
+
 public:
-    ~CBaseIotDevice() noexcept;
+    virtual ~CBaseIotDevice() noexcept;
 
     CBaseIotDevice &operator=(_In_ const CBaseIotDevice &) = delete;
     CBaseIotDevice &operator=(_Inout_ CBaseIotDevice &&) = delete;
 
     HRESULT SetupDeviceInfo(_In_z_ LPCWSTR szDeviceNameW) noexcept;
-    HRESULT SetupCommInfo(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUserNameA,
-                          _In_ const BYTE aRawPrivateKey[CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES]) noexcept;
-
-    virtual HRESULT SetupAudioProcessors(_In_ CAudioProcessorList &vecAudioProcessors) noexcept = 0;
 
     ULONGLONG GetID() const noexcept final;
 
@@ -57,8 +52,8 @@ public:
         return m_szDeviceNameW;
     };
 
-    HRESULT InitComm() noexcept;
-    VOID DeinitComm() noexcept;
+    virtual HRESULT InitComm() noexcept;
+    virtual VOID DeinitComm() noexcept;
 
     virtual VOID FirstRender() noexcept = 0;
 
@@ -72,31 +67,29 @@ public:
     HRESULT OnPostAttachEvent() noexcept override;
 
 protected:
-    HRESULT SendIotMessage(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen,
-                           _In_ BOOL bReliable) noexcept;
+    // Leave three client rows for device content and status inside the frame border.
+    static constexpr INT DEVICE_STATUS_ROW = 3;
+    static constexpr INT DEVICE_FRAME_HEIGHT = DEVICE_STATUS_ROW + 2;
 
-    BOOL IsIotConnected() const noexcept;
-
-    virtual VOID OnIotConnectionStateChanged(_In_ BOOL bConnected) noexcept;
-
-private:
-    DWORD IotThreadProc() noexcept;
-
-    VOID OnIotMessage(_In_ USHORT nCmd, _In_ const BYTE *lpData, _In_ SIZE_T nDataLen) noexcept;
-    VOID OnIotClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA, _In_ HRESULT hrInternalReason) noexcept;
+    VOID SetDeviceStatus(_In_z_ LPCWSTR szReasonW, _In_ INT iColor) noexcept;
 
 protected:
-    mutable LONG volatile m_lRundownProt{ 0 };
-    LPWSTR m_szDeviceNameW{ nullptr };
+    const CAudioProcessors &m_cAudioProcessors;
+
     struct {
-        CThread cThread;
-        // CWindowsEvent cThreadExitEvent;
-        CIotCommClient cClient;
-        CWindowsEvent cClientClosedEvent;
-        LPWSTR szHostNameW{ nullptr };
-        LPSTR szUserNameA{ nullptr };
-        BYTE aRawPrivateKey[CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES]{};
-    } m_sIot{};
+        CMutex cMutex;
+        WCHAR szTextW[128]{ L"Disconnected" };
+        SIZE_T nTextLen{ 12 };
+        INT iTextColor{ 0 };
+        SIZE_T nTextOffset{ SIZE_MAX };
+        INT iLastVisibleStatusChars{ INT_MAX };
+        ULONGLONG ullLastRefreshMs{ 0 };
+    } m_sDeviceStatus = {};
+
+    LPWSTR m_szDeviceNameW{ nullptr };
+
+private:
+    VOID RenderDeviceStatus() noexcept;
 };
 
 typedef std::vector<std::unique_ptr<CBaseIotDevice>> CIotDeviceList;

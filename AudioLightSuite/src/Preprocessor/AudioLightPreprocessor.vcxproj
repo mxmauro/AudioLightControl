@@ -95,6 +95,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Common\Audio\AudioAnalysis.cpp" />
+    <ClCompile Include="..\Common\Utils\Timer.cpp" />
     <ClCompile Include="AudioLightPreprocessor.cpp" />
     <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="FeatureExtractor.cpp" />
@@ -103,6 +104,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common\Audio\AudioAnalysis.h" />
+    <ClInclude Include="..\Common\Utils\ComStart.h" />
+    <ClInclude Include="..\Common\Utils\Timer.h" />
     <ClInclude Include="CommandLine.h" />
     <ClInclude Include="FeatureExtractor.h" />
     <ClInclude Include="resource.h" />

@@ -1,0 +1,19 @@
+{
+  "irGpio": -1,
+  "output": {
+    "type": "dmx",
+    "txGpio": 3,
+    "fixtures": [
+      {
+        "type": "PAR 54x3W RGB (3CH)",
+        "channel": 1,
+        "color": "Color.Red|Color.Green|Color.Blue"
+      },
+      {
+        "type": "PAR 54x3W RGB (3CH)",
+        "channel": 4,
+        "color": "Color.Red|Color.Green|Color.Blue"
+      }
+    ]
+  }
+}

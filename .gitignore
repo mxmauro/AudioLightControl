@@ -1,0 +1,9 @@
+*.~*
+*.bak
+*.old
+.DS_Store
+.cache
+.codex/*
+!.codex/*.toml
+!.codex/skills/
+!.codex/skills/**

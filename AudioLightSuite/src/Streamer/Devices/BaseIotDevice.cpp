@@ -3,38 +3,18 @@
 #include "BaseIotDevice.h"
 #include "TUI\TUiFrameWindow.h"
 #include "Utils\FNV.h"
-#include "Utils\RundownProtection.h"
+#include "Utils\Timer.h"
 
 // -----------------------------------------------------------------------------
 
-CBaseIotDevice::CBaseIotDevice() noexcept : CTUiWindow(), CPersistantSettings()
+CBaseIotDevice::CBaseIotDevice(_In_ const CAudioProcessors &cAudioProcessors) noexcept : CTUiWindow(), CPersistantSettings(),
+                                                                                         m_cAudioProcessors(cAudioProcessors)
 {
-    // Setup IoT client callbacks
-    m_sIot.cClient.OnMessageReceived([this](_In_ USHORT nCmd, _In_ const BYTE *lpData, _In_ SIZE_T nDataLen)
-    {
-        this->OnIotMessage(nCmd, lpData, nDataLen);
-    });
-    m_sIot.cClient.OnClose([this](_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA, _In_ HRESULT hrInternalReason)
-    {
-        this->OnIotClose(nCode, szReasonA, hrInternalReason);
-    });
+    SetDeviceStatus(L"Not initialized", 0);
 }
 
 CBaseIotDevice::~CBaseIotDevice() noexcept
 {
-    DeinitComm();
-
-    if (m_sIot.szHostNameW)
-    {
-        memset(m_sIot.szHostNameW, 0, wcslen(m_sIot.szHostNameW) * sizeof(WCHAR));
-        free(m_sIot.szHostNameW);
-    }
-    if (m_sIot.szUserNameA)
-    {
-        memset(m_sIot.szUserNameA, 0, strlen(m_sIot.szUserNameA) * sizeof(CHAR));
-        free(m_sIot.szUserNameA);
-    }
-    memset(m_sIot.aRawPrivateKey, 0, sizeof(m_sIot.aRawPrivateKey));
     if (m_szDeviceNameW)
     {
         memset(m_szDeviceNameW, 0, wcslen(m_szDeviceNameW) * sizeof(WCHAR));
@@ -72,49 +52,6 @@ HRESULT CBaseIotDevice::SetupDeviceInfo(_In_z_ LPCWSTR szDeviceNameW) noexcept
     return S_OK;
 }
 
-HRESULT CBaseIotDevice::SetupCommInfo(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUserNameA,
-                                      _In_ const BYTE aRawPrivateKey[CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES]) noexcept
-{
-    if ((!szHostNameW) || *szHostNameW == 0 || (!szUserNameA) || *szUserNameA == 0 || !aRawPrivateKey)
-    {
-        return E_INVALIDARG;
-    }
-
-    m_sIot.szHostNameW = _wcsdup(szHostNameW);
-    if (!m_sIot.szHostNameW)
-    {
-error_no_mem:
-        if (m_sIot.szHostNameW)
-        {
-            memset(m_sIot.szHostNameW, 0, wcslen(m_sIot.szHostNameW) * sizeof(WCHAR));
-            free(m_sIot.szHostNameW);
-            m_sIot.szHostNameW = nullptr;
-        }
-        if (m_sIot.szUserNameA)
-        {
-            memset(m_sIot.szUserNameA, 0, strlen(m_sIot.szUserNameA) * sizeof(CHAR));
-            free(m_sIot.szUserNameA);
-            m_sIot.szUserNameA = nullptr;
-        }
-        if (m_szDeviceNameW)
-        {
-            memset(m_szDeviceNameW, 0, wcslen(m_szDeviceNameW) * sizeof(WCHAR));
-            free(m_szDeviceNameW);
-            m_szDeviceNameW = nullptr;
-        }
-        return E_OUTOFMEMORY;
-    }
-    m_sIot.szUserNameA = _strdup(szUserNameA);
-    if (!m_sIot.szUserNameA)
-    {
-        goto error_no_mem;
-    }
-    memcpy(m_sIot.aRawPrivateKey, aRawPrivateKey, CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES);
-
-    // Done
-    return S_OK;
-}
-
 ULONGLONG CBaseIotDevice::GetID() const noexcept
 {
     LPCSTR szTypeA = GetType();
@@ -124,32 +61,18 @@ ULONGLONG CBaseIotDevice::GetID() const noexcept
     return Hash::Fnv1A64(szTypeA, strlen(szTypeA), ullHash);
 }
 
-HRESULT CBaseIotDevice:: InitComm() noexcept
+HRESULT CBaseIotDevice::InitComm() noexcept
 {
-    HRESULT hRes;
-
-    // Start IoT worker thread
-    hRes = m_sIot.cClientClosedEvent.Create(TRUE);
-    if (SUCCEEDED(hRes))
-    {
-        hRes = m_sIot.cThread.Start([this](_In_ CThread*)
-        {
-            return IotThreadProc();
-        });
-    }
-
-    // Done
-    return hRes;
+    return S_OK;
 }
 
 VOID CBaseIotDevice::DeinitComm() noexcept
 {
-    m_sIot.cThread.Stop();
 }
 
 VOID CBaseIotDevice::TimerTick() noexcept
 {
-    // Nothing to do
+    RenderDeviceStatus();
 }
 
 BOOL CBaseIotDevice::SupportsManualColorActions() const noexcept
@@ -164,112 +87,93 @@ HRESULT CBaseIotDevice::OnManualColorAction(_In_ const ManualColorAction_t &sAct
     return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
 }
 
-HRESULT CBaseIotDevice::SendIotMessage(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen,
-                                       _In_ BOOL bReliable) noexcept
+VOID CBaseIotDevice::SetDeviceStatus(_In_z_ LPCWSTR szReasonW, _In_ INT iColor) noexcept
 {
-    CAutoRundownProtection cAutoRundownProt(&m_lRundownProt);
+    CMutex::CAutoLock lock(m_sDeviceStatus.cMutex);
 
-    if (!cAutoRundownProt.IsAcquired())
-    {
-        return HRESULT_FROM_WIN32(ERROR_OPERATION_ABORTED);
-    }
-    if ((!lpPayload) || nPayloadLen == 0)
-    {
-        return E_INVALIDARG;
-    }
-    if (bReliable)
-    {
-        return m_sIot.cClient.SendCommand(nCmd, lpPayload, nPayloadLen);
-    }
-    return m_sIot.cClient.SendUdpCommand(nCmd, lpPayload, nPayloadLen);
+    wcsncpy_s(m_sDeviceStatus.szTextW, szReasonW, _TRUNCATE);
+    m_sDeviceStatus.nTextLen = wcslen(m_sDeviceStatus.szTextW);
+    m_sDeviceStatus.iTextColor = iColor;
+
+    m_sDeviceStatus.ullLastRefreshMs = 0;
+    m_sDeviceStatus.nTextOffset = SIZE_MAX;
+    m_sDeviceStatus.iLastVisibleStatusChars = INT_MAX;
 }
 
-BOOL CBaseIotDevice::IsIotConnected() const noexcept
+VOID CBaseIotDevice::RenderDeviceStatus() noexcept
 {
-    CAutoRundownProtection cAutoRundownProt(&m_lRundownProt);
+    static constexpr WCHAR STATUS_SCROLL_SEPARATOR[] = L" | ";
+    WCHAR szStatusW[128];
+    SIZE_T nStatusLen;
+    INT iStatusColor;
+    ULONGLONG ullNow;
+    INT iVisibleStatusChars;
 
-    return (cAutoRundownProt.IsAcquired() && m_sIot.cClient.GetLinkState() == CIotCommClient::LinkStateConnected) ? TRUE : FALSE;
-}
-
-VOID CBaseIotDevice::OnIotConnectionStateChanged(_In_ BOOL bConnected) noexcept
-{
-    // Nothing to do
-}
-
-DWORD CBaseIotDevice::IotThreadProc() noexcept
-{
-    HANDLE hEvents[2];
-    DWORD dw, dwLoopTimeoutMs;
-    CIotCommClient::CCommandResult cResult;
-    HRESULT hRes;
-
-    hEvents[0] = m_sIot.cThread.GetExitEvent();
-    hEvents[1] = m_sIot.cClientClosedEvent.GetEvent();
-    dwLoopTimeoutMs = 0;
-    while (::WaitForSingleObject(hEvents[0], dwLoopTimeoutMs) == WAIT_TIMEOUT)
-    {
-        m_sIot.cClientClosedEvent.Reset();
-        hRes = m_sIot.cClient.Connect(m_sIot.szHostNameW, m_sIot.szUserNameA, m_sIot.aRawPrivateKey, 10000, hEvents[0]);
-        if (FAILED(hRes))
-        {
-            // Cannot connect, try to reconnect after a short delay
-            dwLoopTimeoutMs = 1000;
-            continue;
-        }
-
-        // Open UDP channel
-        cResult = m_sIot.cClient.OpenUdpChannel();
-        if (cResult.Failed())
-        {
-            m_sIot.cClient.Close(WINHTTP_WEB_SOCKET_ENDPOINT_TERMINATED_CLOSE_STATUS);
-
-            // Cannot open UDP channel, try to reconnect after a short delay
-            dwLoopTimeoutMs = 1000;
-            continue;
-        }
-
-        // Notify connection state change
-        OnIotConnectionStateChanged(TRUE);
-
-        // Wait until either exit event or client closed event is signaled
-        dw = ::WaitForMultipleObjects(2, hEvents, FALSE, INFINITE);
-
-        // In either case, notify connection state change
-        OnIotConnectionStateChanged(FALSE);
-
-        if (dw != WAIT_OBJECT_0 + 1)
-        {
-            break;
-        }
-
-        // Client closed, try to reconnect after a short delay
-        dwLoopTimeoutMs = 2000;
-    }
-
-    RundownProt_WaitForRelease(&m_lRundownProt);
-
-    m_sIot.cClient.ForceClose();
-
-    // Done
-    return 0;
-}
-
-VOID CBaseIotDevice::OnIotMessage(_In_ USHORT nCmd, _In_ const BYTE *lpData, _In_ SIZE_T nDataLen) noexcept
-{
-    CAutoRundownProtection cAutoRundownProt(&m_lRundownProt);
-
-    if (!cAutoRundownProt.IsAcquired())
+    iVisibleStatusChars = GetClientWidth() - 8;
+    if (iVisibleStatusChars <= 0)
     {
         return;
     }
-}
-
-VOID CBaseIotDevice::OnIotClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA, _In_ HRESULT hrInternalReason) noexcept
-{
-    CAutoRundownProtection cAutoRundownProt(&m_lRundownProt);
-
-    if (cAutoRundownProt.IsAcquired())
+    if (static_cast<SIZE_T>(iVisibleStatusChars) > _countof(szStatusW))
     {
-        m_sIot.cClientClosedEvent.Set();
+        iVisibleStatusChars = static_cast<INT>(_countof(szStatusW));
     }
+
+    {
+        CMutex::CAutoLock lock(m_sDeviceStatus.cMutex);
+
+        ullNow = GetCurrentTimeMs();
+        if (m_sDeviceStatus.nTextOffset != SIZE_MAX && ullNow - m_sDeviceStatus.ullLastRefreshMs < 200)
+        {
+            return;
+        }
+        m_sDeviceStatus.ullLastRefreshMs = ullNow;
+
+        // NOTE: Remember the client width does not
+
+        if (m_sDeviceStatus.nTextLen <= static_cast<SIZE_T>(iVisibleStatusChars))
+        {
+            if (m_sDeviceStatus.nTextOffset != SIZE_MAX && m_sDeviceStatus.iLastVisibleStatusChars == iVisibleStatusChars)
+            {
+                return; // No need to re-render a visible text
+            }
+
+            m_sDeviceStatus.nTextOffset = 0; // No offset
+
+            wcsncpy_s(szStatusW, m_sDeviceStatus.szTextW, _TRUNCATE);
+            nStatusLen = m_sDeviceStatus.nTextLen;
+        }
+        else
+        {
+            SIZE_T nTextOfs, nFullTextLen;
+
+            nFullTextLen = m_sDeviceStatus.nTextLen + (_countof(STATUS_SCROLL_SEPARATOR) - 1);
+
+            m_sDeviceStatus.nTextOffset += 1;
+            if (m_sDeviceStatus.nTextOffset >= nFullTextLen)
+            {
+                m_sDeviceStatus.nTextOffset = 0;
+            }
+
+            nTextOfs = m_sDeviceStatus.nTextOffset;
+            nStatusLen = static_cast<SIZE_T>(iVisibleStatusChars);
+            for (SIZE_T n = 0; n < nStatusLen; n++)
+            {
+                szStatusW[n] = (nTextOfs < m_sDeviceStatus.nTextLen) ? m_sDeviceStatus.szTextW[nTextOfs]
+                                                                        : STATUS_SCROLL_SEPARATOR[nTextOfs - m_sDeviceStatus.nTextLen];
+
+                nTextOfs += 1;
+                if (nTextOfs >= nFullTextLen)
+                {
+                    nTextOfs = 0;
+                }
+            }
+        }
+
+        m_sDeviceStatus.iLastVisibleStatusChars = iVisibleStatusChars;
+        iStatusColor = m_sDeviceStatus.iTextColor;
+    }
+
+    m_lpTerminalControl->PrintRegion(GetClientRegionHandle(), L"\x1b[%d;1H\x1b[97mStatus:\x1b[0m \x1b[%dm%-*.*s\x1b[0m", DEVICE_STATUS_ROW,
+                                     iStatusColor, iVisibleStatusChars, static_cast<INT>(nStatusLen), szStatusW);
 }

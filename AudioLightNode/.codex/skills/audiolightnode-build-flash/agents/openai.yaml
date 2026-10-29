@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioLightNode Build Flow"
+  short_description: "Build, flash, and monitor this ESP-IDF node"
+  default_prompt: "Use $audiolightnode-build-flash to build, flash, or debug the AudioLightNode firmware."

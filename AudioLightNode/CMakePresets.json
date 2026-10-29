@@ -1,0 +1,73 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "Debug",
+      "generator": "Ninja",
+      "binaryDir": "build/debug",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c3",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.debug",
+        "SDKCONFIG": "debug/sdkconfig"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "compileArgs",
+              "value": [
+                "-G",
+                "Ninja",
+                "-DPYTHON_DEPS_CHECKED=1",
+                "-DESP_PLATFORM=1",
+                "-DIDF_TARGET=esp32c3"
+              ]
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Release",
+      "generator": "Ninja",
+      "binaryDir": "build/release",
+      "cacheVariables": {
+        "IDF_TARGET": "esp32c3",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.release",
+        "SDKCONFIG": "release/sdkconfig"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "compileArgs",
+              "value": [
+                "-G",
+                "Ninja",
+                "-DPYTHON_DEPS_CHECKED=1",
+                "-DESP_PLATFORM=1",
+                "-DIDF_TARGET=esp32c3",
+                "-DCMAKE_BUILD_TYPE=Release"
+              ]
+            },
+            {
+              "type": "monitorBaudRate",
+              "value": "115200"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

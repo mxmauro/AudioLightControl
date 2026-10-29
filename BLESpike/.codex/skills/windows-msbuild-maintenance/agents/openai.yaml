@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows MSBuild Maintenance"
+  short_description: "Maintain MSBuild project metadata and builds"
+  default_prompt: "Use $windows-msbuild-maintenance to update MSBuild project metadata or validate a build."

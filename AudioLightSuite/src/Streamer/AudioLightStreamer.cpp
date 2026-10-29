@@ -7,8 +7,10 @@
     #include <crtdbg.h>
 #endif //_DEBUG
 #include "AppConfig.h"
+#include "AudioCapture.h"
 #include "CommandLine.h"
 #include "Engine.h"
+#include "Utils\ComStart.h"
 #include "Utils\MessageBoxUtils.h"
 #include "Utils\WinsockStart.h"
 
@@ -16,9 +18,13 @@
 
 // -----------------------------------------------------------------------------
 
+static HRESULT RunStreamer(_In_ HINSTANCE hInstance);
+static HRESULT ListInputDevices();
+
+// -----------------------------------------------------------------------------
+
 INT APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLineW, _In_ INT nCmdShow)
 {
-    CWinsockStart cWinsockStart;
     HRESULT hRes;
 
 #ifdef _DEBUG
@@ -26,12 +32,28 @@ INT APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 #endif //_DEBUG
 
     // Parse command line parameters
-
     hRes = ParseCmdLimeParameters(lpCmdLineW);
     if (FAILED(hRes))
     {
         return (int)hRes;
     }
+
+    // Run streamer or list input devices
+    if (GetCmdLimeParameters().bListInputDevices != FALSE)
+    {
+        return (int)ListInputDevices();
+    }
+
+    return (int)RunStreamer(hInstance);
+}
+
+// -----------------------------------------------------------------------------
+
+static HRESULT RunStreamer(_In_ HINSTANCE hInstance)
+{
+    CComStart cComStart;
+    CWinsockStart cWinsockStart;
+    HRESULT hRes;
 
     // Read application configuration
     hRes = ReadAppConfig();
@@ -40,25 +62,51 @@ INT APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
         return (int)hRes;
     }
 
-    // Initialize Winsock
+    // Check COM initialization
+    if (!cComStart.Succeeded())
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to initialize COM.", L"Audio Light Streamer", cComStart.HResult());
+        return (int)cComStart.HResult();
+    }
+
+    // Check Winsock initialization
     if (!cWinsockStart.Succeeded())
     {
         ErrorMessageBoxW(nullptr, L"Unable to initialize Winsock.", L"Audio Light Streamer", cWinsockStart.HResult());
         return (int)cWinsockStart.HResult();
     }
 
-    // Initialize COM
-    hRes = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to initialize COM.", L"Audio Light Streamer", hRes);
-        return (int)hRes;
-    }
-
     // Create main window
     hRes = RunEngine(hInstance);
 
     // Done
-    ::CoUninitialize();
+    return (int)hRes;
+}
+
+static HRESULT ListInputDevices()
+{
+    CComStart cComStart;
+    std::wstring strInputDevicesW;
+    HRESULT hRes;
+
+    // Check COM initialization
+    if (!cComStart.Succeeded())
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to initialize COM.", L"Audio Light Streamer", cComStart.HResult());
+        return (int)cComStart.HResult();
+    }
+
+    // Get list of input audio devices
+    hRes = CAudioCapture::GetInputAudioDevicesText(strInputDevicesW);
+    if (SUCCEEDED(hRes))
+    {
+        MessageBoxW(nullptr, strInputDevicesW.c_str(), L"Audio Input Devices", MB_OK | MB_ICONINFORMATION);
+    }
+    else
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to list audio input devices.", L"Audio Light Streamer", hRes);
+    }
+
+    // Done
     return (int)hRes;
 }

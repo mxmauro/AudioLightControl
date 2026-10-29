@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "build:dir": "build",
+  "name": "AudioLight IoT Setup",
+  "outputfilename": "AudioLightIoTSetup",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "frontend/src/generated",
+  "author": {
+    "name": "Mauro H. Leggieri",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Mauro H. Leggieri",
+    "productName": "AudioLight IoT Setup",
+    "productVersion": "1.0.0.0",
+    "copyright": "Copyright (C) Mauro H. Leggieri, 2026"
+  }
+}
