@@ -2,11 +2,14 @@
 #include "AppConfig.h"
 #include "Audio\AudioAnalysis.h"
 #include "CommandLine.h"
-#include "Devices\BaseIotDevice.h"
-#include "Devices\DmxIotDevice.h"
-#include "Devices\GoveeStripIotDevice.h"
-#include "Devices\Rgb5050IotDevice.h"
-#include "Devices\SharedManualColorControl.h"
+#include "Devices\AudioLightNodeDevice.h"
+#include "Devices\GoveeStripDevice.h"
+#include "Lighting\BaseLighting.h"
+#include "Lighting\DmxLighting.h"
+#include "Lighting\GoveeStripLighting.h"
+#include "Lighting\Rgb5050Lighting.h"
+#include "Lighting\SharedManualColorControl.h"
+#include "Lighting\Ws281xLighting.h"
 #include "Engine.h"
 #include "Monitors\AudioAnalysisMonitor.h"
 #include "Monitors\BaseMonitor.h"
@@ -20,6 +23,7 @@
 #include "Utils\Exception2HR.h"
 #include "Utils\MessageBoxUtils.h"
 #include <memory>
+#include <string>
 #include <vector>
 #include "resource.h"
 
@@ -39,9 +43,10 @@ static CAudioCapture cAudioCapture;
 static CAudioAnalyzer cAudioAnalyzer;
 static CAudioProcessors cAudioProcessors;
 static CMonitorList vecMonitors;
-static CIotDeviceList vecIotDevices;
+static CLightingList vecLighting;
+static std::vector<std::unique_ptr<CAudioLightNodeDevice>> vecAudioLightNodeDevices;
+static std::vector<std::unique_ptr<CGoveeStripDevice>> vecGoveeStripDevices;
 static std::unique_ptr<CSharedManualColorControlWindow> cSharedManualColorControlWindow;
-static std::vector<std::unique_ptr<CTUiFrameWindow>> vecTUiFrames;
 static CThread cTickThread;
 
 // -----------------------------------------------------------------------------
@@ -65,7 +70,7 @@ static HRESULT LoadWindowPosition(_In_ CBaseAudioProcessor *lpAudioProc, _In_ CT
                                   _Inout_ PanelGrid_t &sPanelGrid, _Out_ INT &iX, _Out_ INT &iY);
 static HRESULT LoadWindowPosition(_In_ CBaseMonitor *lpMonitor, _In_ CTUiWindow *lpAttachedWindow,
                                   _Inout_ PanelGrid_t &sPanelGrid, _Out_ INT &iX, _Out_ INT &iY);
-static HRESULT LoadWindowPosition(_In_ CBaseIotDevice *lpIotDevice, _In_ CTUiWindow *lpAttachedWindow,
+static HRESULT LoadWindowPosition(_In_ CBaseLighting *lpLighting, _In_ CTUiWindow *lpAttachedWindow,
                                   _Inout_ PanelGrid_t &sPanelGrid, _Out_ INT &iX, _Out_ INT &iY);
 static HRESULT LoadWindowPositionCommon(_In_ HRESULT hRes, _In_ CTUiWindow *lpWnd, _Inout_ PanelGrid_t &sPanelGrid, _Inout_ INT &iX,
                                         _Inout_ INT &iY);
@@ -77,11 +82,15 @@ HRESULT RunEngine(_In_ HINSTANCE hInstance) noexcept
     HRESULT hRes;
 
     hRes = Initialize(hInstance);
-    while (SUCCEEDED(hRes))
+    if (SUCCEEDED(hRes))
     {
-        hRes = cWndMgr.ProcessMessages(TRUE);
+        do
+        {
+            hRes = cWndMgr.ProcessMessages(TRUE);
+        }
+        while (hRes == S_FALSE);
+        Finalize();
     }
-    Finalize();
     return hRes;
 }
 
@@ -197,7 +206,231 @@ static HRESULT Initialize(_In_ HINSTANCE hInstance) noexcept
         return hRes;
     }
 
-    // Instantiate every configured output, then let its connection worker validate the physical device.
+    // Instantiate all lighting panels before starting a shared AudioLight Node connection.
+    for (const CConfig::Device &dev : GetAppConfig().m_vecDevices)
+    {
+        CAudioLightNodeDevice *lpNodeDevice = nullptr;
+        CGoveeStripDevice *lpGoveeStripDevice = nullptr;
+        BOOL bGovee = dev.vecLighting[0].eType == CConfig::DeviceType::GoveeStrip ? TRUE : FALSE;
+
+        if (bGovee != FALSE)
+        {
+            std::unique_ptr<CGoveeStripDevice> goveeStripDevice;
+
+            hRes = TranslateToHresult([&]()
+            {
+                goveeStripDevice = std::make_unique<CGoveeStripDevice>();
+            });
+            if (SUCCEEDED(hRes))
+            {
+                hRes = goveeStripDevice->SetupEndpoint(dev.strHost.c_str());
+            }
+            if (FAILED(hRes))
+            {
+                ErrorMessageBoxW(nullptr, L"Unable to create Govee Strip communication.", L"Audio Light Streamer", hRes);
+                return hRes;
+            }
+            lpGoveeStripDevice = goveeStripDevice.get();
+            try
+            {
+                vecGoveeStripDevices.push_back(std::move(goveeStripDevice));
+            }
+            catch (const std::bad_alloc &)
+            {
+                return E_OUTOFMEMORY;
+            }
+        }
+        else
+        {
+            std::unique_ptr<CAudioLightNodeDevice> nodeDevice;
+
+            hRes = TranslateToHresult([&]()
+            {
+                nodeDevice = std::make_unique<CAudioLightNodeDevice>();
+            });
+            if (SUCCEEDED(hRes))
+            {
+                hRes = nodeDevice->SetupCommInfo(dev.strHost.c_str(), dev.strUserName.c_str(), dev.aPrivateKey,
+                                                  static_cast<BYTE>(dev.vecLighting.size()));
+            }
+            if (FAILED(hRes))
+            {
+                ErrorMessageBoxW(nullptr, L"Unable to create AudioLight Node communication.", L"Audio Light Streamer", hRes);
+                return hRes;
+            }
+            lpNodeDevice = nodeDevice.get();
+            try
+            {
+                vecAudioLightNodeDevices.push_back(std::move(nodeDevice));
+            }
+            catch (const std::bad_alloc &)
+            {
+                return E_OUTOFMEMORY;
+            }
+        }
+
+        for (SIZE_T nLightingIndex = 0; nLightingIndex < dev.vecLighting.size(); nLightingIndex++)
+        {
+            const CConfig::Lighting &lighting = dev.vecLighting[nLightingIndex];
+            std::unique_ptr<CBaseLighting> lightingDevice;
+            std::unique_ptr<CTUiFrameWindow> frameWindow;
+            std::wstring strPanelName = dev.strName;
+
+            if (dev.vecLighting.size() > 1)
+            {
+                strPanelName += L" - Light #";
+                strPanelName += std::to_wstring(nLightingIndex + 1);
+            }
+
+            switch (lighting.eType)
+            {
+                case CConfig::DeviceType::Rgb5050:
+                    {
+                        std::unique_ptr<CRgb5050Lighting> rgbLighting;
+
+                        hRes = TranslateToHresult([&]()
+                        {
+                            rgbLighting = std::make_unique<CRgb5050Lighting>(cAudioProcessors);
+                        });
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = rgbLighting->SetupEffects(lighting.vecEffects);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = rgbLighting->SetupNodeDevice(lpNodeDevice, static_cast<BYTE>(nLightingIndex));
+                        }
+                        lightingDevice = std::move(rgbLighting);
+                    }
+                    break;
+
+                case CConfig::DeviceType::Dmx:
+                    {
+                        std::unique_ptr<CDmxLighting> dmxLighting;
+
+                        hRes = TranslateToHresult([&]()
+                        {
+                            dmxLighting = std::make_unique<CDmxLighting>(cAudioProcessors);
+                        });
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = dmxLighting->SetupFixtures(lighting.vecDmxFixtures);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = dmxLighting->SetupNodeDevice(lpNodeDevice, static_cast<BYTE>(nLightingIndex));
+                        }
+                        lightingDevice = std::move(dmxLighting);
+                    }
+                    break;
+
+                case CConfig::DeviceType::Ws281x:
+                    {
+                        std::unique_ptr<CWs281xLighting> wsLighting;
+
+                        hRes = TranslateToHresult([&]()
+                        {
+                            wsLighting = std::make_unique<CWs281xLighting>(cAudioProcessors);
+                        });
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = wsLighting->SetupStripLength(lighting.nStripLength);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = wsLighting->SetupEffects(lighting.vecEffects);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = wsLighting->SetupNodeDevice(lpNodeDevice, static_cast<BYTE>(nLightingIndex));
+                        }
+                        lightingDevice = std::move(wsLighting);
+                    }
+                    break;
+
+                case CConfig::DeviceType::GoveeStrip:
+                    {
+                        std::unique_ptr<CGoveeStripLighting> goveeLighting;
+
+                        hRes = TranslateToHresult([&]()
+                        {
+                            goveeLighting = std::make_unique<CGoveeStripLighting>(cAudioProcessors);
+                        });
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = goveeLighting->SetupSupportsRazer(lighting.bSupportsRazer);
+                        }
+                        if (SUCCEEDED(hRes) && lighting.bSupportsRazer != FALSE)
+                        {
+                            hRes = goveeLighting->SetupStripLength(lighting.nStripLength);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = goveeLighting->SetupEffects(lighting.vecEffects);
+                        }
+                        if (SUCCEEDED(hRes))
+                        {
+                            hRes = goveeLighting->SetupGoveeStripDevice(lpGoveeStripDevice);
+                        }
+                        lightingDevice = std::move(goveeLighting);
+                    }
+                    break;
+
+                default:
+                    hRes = E_NOTIMPL;
+                    break;
+            }
+            if (FAILED(hRes))
+            {
+                ErrorMessageBoxW(nullptr, L"Unable to initialize lighting output.", L"Audio Light Streamer", hRes);
+                return hRes;
+            }
+            hRes = lightingDevice->SetupDeviceInfo(strPanelName.c_str());
+            if (SUCCEEDED(hRes))
+            {
+                hRes = TranslateToHresult([&]()
+                {
+                    frameWindow = std::make_unique<CTUiFrameWindow>(lightingDevice.get());
+                });
+            }
+            if (SUCCEEDED(hRes))
+            {
+                hRes = LoadWindowPosition(lightingDevice.get(), frameWindow.get(), sPanelGrid, iX, iY);
+            }
+            if (SUCCEEDED(hRes))
+            {
+                hRes = TranslateToHresult([&]()
+                {
+                    vecLighting.push_back(std::move(lightingDevice));
+                });
+            }
+            if (SUCCEEDED(hRes))
+            {
+                hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
+                if (SUCCEEDED(hRes))
+                {
+                    frameWindow.release();
+                }
+            }
+            if (FAILED(hRes))
+            {
+                ErrorMessageBoxW(nullptr, L"Unable to attach lighting output.", L"Audio Light Streamer", hRes);
+                return hRes;
+            }
+        }
+        if (lpNodeDevice)
+        {
+            hRes = lpNodeDevice->Init();
+            if (FAILED(hRes))
+            {
+                ErrorMessageBoxW(nullptr, L"Unable to start AudioLight Node communication.", L"Audio Light Streamer", hRes);
+                return hRes;
+            }
+        }
+    }
+
+#if 0
+    // Superseded single-output construction retained temporarily for reference.
     for (const auto &dev : GetAppConfig().m_vecDevices)
     {
         std::unique_ptr<CBaseIotDevice> iotDevice;
@@ -369,16 +602,7 @@ static HRESULT Initialize(_In_ HINSTANCE hInstance) noexcept
             ErrorMessageBoxW(nullptr, szErrMsgBufW, L"Audio Light Streamer", hRes);
             return hRes;
         }
-
-        hRes = TranslateToHresult([&]()
-        {
-            vecTUiFrames.push_back(std::move(frameWindow));
-        });
-        if (FAILED(hRes))
-        {
-            ErrorMessageBoxW(nullptr, L"Unable to add IoT device frame to list.", L"Audio Light Streamer", hRes);
-            return hRes;
-        }
+        frameWindow.release();
 
         hRes = iotDevice->InitComm();
         if (FAILED(hRes))
@@ -399,6 +623,8 @@ static HRESULT Initialize(_In_ HINSTANCE hInstance) noexcept
         }
     }
 
+#endif
+
     // Add the shared manual-color panel after its target devices have been registered.
     hRes = CreateSharedManualColorControlWindow(sPanelGrid);
     if (FAILED(hRes))
@@ -415,9 +641,9 @@ static HRESULT Initialize(_In_ HINSTANCE hInstance) noexcept
     {
         monitor->FirstRender();
     }
-    for (const auto &iotDevice : vecIotDevices)
+    for (const auto &lighting : vecLighting)
     {
-        iotDevice->FirstRender();
+        lighting->FirstRender();
     }
     if (cSharedManualColorControlWindow)
     {
@@ -454,12 +680,17 @@ static VOID Finalize() noexcept
 {
     cTickThread.Stop();
     cAudioCapture.Finalize();
-    cWndMgr.Finalize();
-    vecTUiFrames.clear();
     cSharedManualColorControlWindow.reset();
-    vecIotDevices.clear();
+    for (const std::unique_ptr<CAudioLightNodeDevice> &nodeDevice : vecAudioLightNodeDevices)
+    {
+        nodeDevice->Deinit();
+    }
+    vecLighting.clear();
+    vecAudioLightNodeDevices.clear();
+    vecGoveeStripDevices.clear();
     vecMonitors.clear();
     cAudioProcessors.Clear();
+    cWndMgr.Finalize();
 }
 
 static VOID TimerTick() noexcept
@@ -474,9 +705,9 @@ static VOID TimerTick() noexcept
         monitor->TimerTick();
     }
 
-    for (const auto &iotDevice : vecIotDevices)
+    for (const auto &lighting : vecLighting)
     {
-        iotDevice->TimerTick();
+        lighting->TimerTick();
     }
 }
 
@@ -503,9 +734,9 @@ static VOID OnAudioData(_In_ const float *lpfPCM, _In_ UINT32 ulSamplesCount, _I
         monitor->Process(sFrame);
     }
 
-    for (const auto &iotDevice : vecIotDevices)
+    for (const auto &lighting : vecLighting)
     {
-        iotDevice->Process();
+        lighting->Process();
     }
 }
 
@@ -554,29 +785,20 @@ static HRESULT CreateSpectrumColorAudioProcessor(_Inout_ PanelGrid_t &sPanelGrid
         return hRes;
     }
 
-    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for spectrum color audio processor.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
-    hRes = TranslateToHresult([&]()
-    {
-        vecTUiFrames.push_back(std::move(frameWindow));
-    });
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to add spectrum color frame to list.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
     hRes = cAudioProcessors.Add(spectrumColorAudioProc);
     if (FAILED(hRes))
     {
         ErrorMessageBoxW(nullptr, L"Unable to add spectrum color audio processor to list.", L"Audio Light Streamer", hRes);
         return hRes;
     }
+
+    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
+    if (FAILED(hRes))
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for spectrum color audio processor.", L"Audio Light Streamer", hRes);
+        return hRes;
+    }
+    frameWindow.release();
 
     return S_OK;
 }
@@ -615,29 +837,20 @@ static HRESULT CreateBandSpectrumAudioProcessor(_Inout_ PanelGrid_t &sPanelGrid)
         return hRes;
     }
 
-    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for band spectrum audio processor.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
-    hRes = TranslateToHresult([&]()
-    {
-        vecTUiFrames.push_back(std::move(frameWindow));
-    });
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to add band spectrum frame to list.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
     hRes = cAudioProcessors.Add(bandSpectrumAudioProc);
     if (FAILED(hRes))
     {
         ErrorMessageBoxW(nullptr, L"Unable to add band spectrum audio processor to list.", L"Audio Light Streamer", hRes);
         return hRes;
     }
+
+    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
+    if (FAILED(hRes))
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for band spectrum audio processor.", L"Audio Light Streamer", hRes);
+        return hRes;
+    }
+    frameWindow.release();
 
     return S_OK;
 }
@@ -685,29 +898,20 @@ static HRESULT CreateTrebleStrobeAudioProcessor(_Inout_ PanelGrid_t &sPanelGrid)
         return hRes;
     }
 
-    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for treble strobe audio processor.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
-    hRes = TranslateToHresult([&]()
-    {
-        vecTUiFrames.push_back(std::move(frameWindow));
-    });
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to add treble strobe frame to list.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
     hRes = cAudioProcessors.Add(trebleStrobeAudioProc);
     if (FAILED(hRes))
     {
         ErrorMessageBoxW(nullptr, L"Unable to add treble strobe audio processor to list.", L"Audio Light Streamer", hRes);
         return hRes;
     }
+
+    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
+    if (FAILED(hRes))
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for treble strobe audio processor.", L"Audio Light Streamer", hRes);
+        return hRes;
+    }
+    frameWindow.release();
 
     return S_OK;
 }
@@ -754,23 +958,6 @@ static HRESULT CreateAudioAnalysisMonitor(_Inout_ PanelGrid_t &sPanelGrid)
         return hRes;
     }
 
-    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for audio analysis monitor.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
-    hRes = TranslateToHresult([&]()
-    {
-        vecTUiFrames.push_back(std::move(frameWindow));
-    });
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to add audio analysis monitor frame to list.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
-
     hRes = TranslateToHresult([&]()
     {
         vecMonitors.push_back(std::move(cAudioAnalysisMonitor));
@@ -781,12 +968,20 @@ static HRESULT CreateAudioAnalysisMonitor(_Inout_ PanelGrid_t &sPanelGrid)
         return hRes;
     }
 
+    hRes = cWndMgr.AttachWindow(frameWindow.get(), iX, iY);
+    if (FAILED(hRes))
+    {
+        ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for audio analysis monitor.", L"Audio Light Streamer", hRes);
+        return hRes;
+    }
+    frameWindow.release();
+
     return S_OK;
 }
 
 static HRESULT CreateSharedManualColorControlWindow(_Inout_ PanelGrid_t &sPanelGrid)
 {
-    std::vector<CBaseIotDevice *> vecSupportedDevices;
+    std::vector<CBaseLighting *> vecSupportedDevices;
     std::unique_ptr<CTUiFrameWindow> frameWindow;
     INT iX, iY;
     HRESULT hRes;
@@ -794,11 +989,11 @@ static HRESULT CreateSharedManualColorControlWindow(_Inout_ PanelGrid_t &sPanelG
     hRes = TranslateToHresult([&]()
     {
         // Collect the raw panel targets before constructing the shared manual-color controller.
-        for (const auto &iotDevice : vecIotDevices)
+        for (const auto &lighting : vecLighting)
         {
-            if (iotDevice && iotDevice->SupportsManualColorActions() != FALSE)
+            if (lighting && lighting->SupportsManualColorActions() != FALSE)
             {
-                vecSupportedDevices.push_back(iotDevice.get());
+                vecSupportedDevices.push_back(lighting.get());
             }
         }
     });
@@ -841,16 +1036,7 @@ static HRESULT CreateSharedManualColorControlWindow(_Inout_ PanelGrid_t &sPanelG
         ErrorMessageBoxW(nullptr, L"Unable to setup terminal console for shared manual color control.", L"Audio Light Streamer", hRes);
         return hRes;
     }
-
-    hRes = TranslateToHresult([&]()
-    {
-        vecTUiFrames.push_back(std::move(frameWindow));
-    });
-    if (FAILED(hRes))
-    {
-        ErrorMessageBoxW(nullptr, L"Unable to add shared manual color control frame to list.", L"Audio Light Streamer", hRes);
-        return hRes;
-    }
+    frameWindow.release();
 
     return S_OK;
 }
@@ -867,10 +1053,10 @@ static HRESULT LoadWindowPosition(_In_ CBaseMonitor *lpMonitor, _In_ CTUiWindow 
     return LoadWindowPositionCommon(lpMonitor->LoadWindowPosition(iX, iY), lpAttachedWindow, sPanelGrid, iX, iY);
 }
 
-static HRESULT LoadWindowPosition(_In_ CBaseIotDevice *lpIotDevice, _In_ CTUiWindow *lpAttachedWindow, _Inout_ PanelGrid_t &sPanelGrid,
+static HRESULT LoadWindowPosition(_In_ CBaseLighting *lpLighting, _In_ CTUiWindow *lpAttachedWindow, _Inout_ PanelGrid_t &sPanelGrid,
                                   _Out_ INT &iX, _Out_ INT &iY)
 {
-    return LoadWindowPositionCommon(lpIotDevice->LoadWindowPosition(iX, iY), lpAttachedWindow, sPanelGrid, iX, iY);
+    return LoadWindowPositionCommon(lpLighting->LoadWindowPosition(iX, iY), lpAttachedWindow, sPanelGrid, iX, iY);
 }
 
 static HRESULT LoadWindowPositionCommon(_In_ HRESULT hRes, _In_ CTUiWindow *lpWnd, _Inout_ PanelGrid_t &sPanelGrid, _Inout_ INT &iX,

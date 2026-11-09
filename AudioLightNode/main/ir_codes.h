@@ -1,5 +1,8 @@
 #pragma once
 
+// -----------------------------------------------------------------------------
+// Remote-control button and NEC code constants
+
 #define REMOTE_CONTROL_BTN_BRIGHT_UP         1
 #define REMOTE_CONTROL_BTN_BRIGHT_DOWN       2
 #define REMOTE_CONTROL_BTN_POWER_ON          3

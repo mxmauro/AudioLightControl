@@ -1,4 +1,6 @@
 <script lang="ts">
+import EyeIcon from '@lucide/svelte/icons/eye';
+import EyeOffIcon from '@lucide/svelte/icons/eye-off';
 import RectangleEllipsisIcon from '@lucide/svelte/icons/rectangle-ellipsis';
 import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 import { Client } from '@mxmauro/iot-comm.js';
@@ -10,6 +12,8 @@ let { client, onnotice }: { client: Client; onnotice: (notice: Notice) => void }
 let name = $state('');
 let publicKey = $state('');
 let confirmation = $state('');
+let showPublicKey = $state(false);
+let showConfirmation = $state(false);
 let mustChange = $state(false);
 let busy = $state(false);
 let errors = $state<Record<string, string>>({});
@@ -77,8 +81,8 @@ const useGeneratedKeyPair = (key: string): void => {
 			><span class="label-text">Public key</span>
 			<div class="relative">
 				<input
-					class="input !pr-12"
-					type="password"
+					class="input !pr-24"
+					type={showPublicKey ? 'text' : 'password'}
 					bind:value={publicKey}
 					placeholder="Base64-encoded 65-byte key"
 					autocomplete="off"
@@ -86,15 +90,30 @@ const useGeneratedKeyPair = (key: string): void => {
 					aria-invalid={!!errors.publicKey}
 					aria-describedby="create-user-public-key-error"
 				>
-				<button
-					class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
-					type="button"
-					aria-label="Generate public and private key pair"
-					disabled={busy}
-					onclick={() => (generatingKeyPair = true)}
-				>
-					<RectangleEllipsisIcon />
-				</button>
+				<div class="absolute inset-y-0 right-0 flex items-center gap-1 pr-1">
+					<button
+						class="btn-icon"
+						type="button"
+						aria-label="Generate public and private key pair"
+						disabled={busy}
+						onclick={() => (generatingKeyPair = true)}
+					>
+						<RectangleEllipsisIcon />
+					</button>
+					<button
+						class="btn-icon"
+						type="button"
+						aria-label={showPublicKey ? 'Hide public key' : 'Show public key'}
+						disabled={busy}
+						onclick={() => (showPublicKey = !showPublicKey)}
+					>
+						{#if showPublicKey}
+							<EyeOffIcon />
+						{:else}
+							<EyeIcon />
+						{/if}
+					</button>
+				</div>
 			</div>
 			{#if errors.publicKey}
 				<small id="create-user-public-key-error" class="text-error-600-400">{errors.publicKey}</small>
@@ -102,15 +121,30 @@ const useGeneratedKeyPair = (key: string): void => {
 		>
 		<label class="label"
 			><span class="label-text">Confirm public key</span>
-			<input
-				class="input"
-				type="password"
-				bind:value={confirmation}
-				autocomplete="off"
-				disabled={busy}
-				aria-invalid={!!errors.confirmation}
-				aria-describedby="create-user-confirmation-error"
-			>
+			<div class="relative">
+				<input
+					class="input !pr-12"
+					type={showConfirmation ? 'text' : 'password'}
+					bind:value={confirmation}
+					autocomplete="off"
+					disabled={busy}
+					aria-invalid={!!errors.confirmation}
+					aria-describedby="create-user-confirmation-error"
+				>
+				<button
+					class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
+					type="button"
+					aria-label={showConfirmation ? 'Hide public-key confirmation' : 'Show public-key confirmation'}
+					disabled={busy}
+					onclick={() => (showConfirmation = !showConfirmation)}
+				>
+					{#if showConfirmation}
+						<EyeOffIcon />
+					{:else}
+						<EyeIcon />
+					{/if}
+				</button>
+			</div>
 			{#if errors.confirmation}
 				<small id="create-user-confirmation-error" class="text-error-600-400">{errors.confirmation}</small>
 			{/if}</label

@@ -4,6 +4,7 @@
 #include <esp_err.h>
 
 // -----------------------------------------------------------------------------
+// GPIO ownership API
 
 typedef enum GpioPinUse_e {
     GpioPinUseNone = 0,

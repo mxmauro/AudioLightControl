@@ -9,10 +9,13 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <portmacro.h>
+#include <stdlib.h>
 #include <string.h>
 #include <task.h>
 
 static const char* TAG = "5050-Controller";
+
+#define LED5050_MAX_CONTROLLERS        2U
 
 #define PWM_FREQUENCY           4000
 #define PWM_RESOLUTION_BITS     LEDC_TIMER_12_BIT
@@ -21,6 +24,7 @@ static const char* TAG = "5050-Controller";
 #define LED_UPDATE_PERIOD_MS    10
 
 // -----------------------------------------------------------------------------
+// Controller command and runtime types
 
 typedef enum CommandType_e {
     CMD_SET = 0,
@@ -30,28 +34,29 @@ typedef enum CommandType_e {
 
 typedef struct Command_s {
     CommandType_t type;
-    RGBColor_t color;
-    RGBColor_t target;
+    RGBColor8_t color;
+    RGBColor8_t target;
     uint32_t timeMs;
 } Command_t;
 
 typedef struct Controller_s {
     Task_t task;
     QueueHandle_t queue;
+    gpio_num_t redGpioPin;
+    gpio_num_t greenGpioPin;
+    gpio_num_t blueGpioPin;
+    bool isActiveLow;
+    ledc_channel_t firstChannel;
 } Controller_t;
 
 // -----------------------------------------------------------------------------
 
-static gpio_num_t redGpioPin = GPIO_NUM_NC;
-static gpio_num_t greenGpioPin = GPIO_NUM_NC;
-static gpio_num_t blueGpioPin = GPIO_NUM_NC;
-static bool isActiveLow = false;
-static Controller_t sController = {};
+static Controller_t* sControllers[LED5050_MAX_CONTROLLERS] = {};
 
 // -----------------------------------------------------------------------------
 
 static void rgbLedTask(Task_t task, void* arg);
-static void applyColor(uint16_t r, uint16_t g, uint16_t b);
+static void applyColor(Controller_t* controller, uint8_t r, uint8_t g, uint8_t b);
 
 // -----------------------------------------------------------------------------
 
@@ -114,28 +119,46 @@ bool ledStrip5050WriteConfig(binary_writer_t* bw, const LedStrip5050Config_t* co
            bw_ext_write_gpio(bw, config->blueGpioPin) && bw_write_byte(bw, config->isActiveLow ? 1U : 0U);
 }
 
-esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config)
+esp_err_t ledStrip5050Init(size_t slot, const LedStrip5050Config_t* config)
 {
+    Controller_t* controller;
     ledc_timer_config_t ledcTimer;
     ledc_channel_config_t ledcChannel;
     esp_err_t err;
 
     assert(config);
 
-    if (sController.task || sController.queue)
+    // Select one fixed PWM channel group for this output slot.
+    if (slot >= LED5050_MAX_CONTROLLERS)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (sControllers[slot])
     {
         return ESP_ERR_INVALID_STATE;
     }
+    controller = static_cast<Controller_t*>(malloc(sizeof(Controller_t)));
+    if (!controller)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(controller, 0, sizeof(Controller_t));
+    controller->redGpioPin = GPIO_NUM_NC;
+    controller->greenGpioPin = GPIO_NUM_NC;
+    controller->blueGpioPin = GPIO_NUM_NC;
 
+    // Reserve all output pins before configuring PWM hardware.
     err = gpioPinManagerClaim(config->redGpioPin, GpioPinUseOutput, "RGB5050 red");
     if (err != ESP_OK)
     {
+        free(controller);
         return err;
     }
     err = gpioPinManagerClaim(config->greenGpioPin, GpioPinUseOutput, "RGB5050 green");
     if (err != ESP_OK)
     {
         gpioPinManagerRelease(config->redGpioPin);
+        free(controller);
         return err;
     }
     err = gpioPinManagerClaim(config->blueGpioPin, GpioPinUseOutput, "RGB5050 blue");
@@ -143,17 +166,22 @@ esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config)
     {
         gpioPinManagerRelease(config->greenGpioPin);
         gpioPinManagerRelease(config->redGpioPin);
+        free(controller);
         return err;
     }
 
-    redGpioPin = config->redGpioPin;
-    greenGpioPin = config->greenGpioPin;
-    blueGpioPin = config->blueGpioPin;
-    isActiveLow = config->isActiveLow;
+    // Publish the slot state before failure cleanup can use it.
+    sControllers[slot] = controller;
+    controller->redGpioPin = config->redGpioPin;
+    controller->greenGpioPin = config->greenGpioPin;
+    controller->blueGpioPin = config->blueGpioPin;
+    controller->isActiveLow = config->isActiveLow;
+    controller->firstChannel = static_cast<ledc_channel_t>(slot * 3U);
 
     memset(&ledcTimer, 0, sizeof(ledcTimer));
     memset(&ledcChannel, 0, sizeof(ledcChannel));
 
+    // Share timer zero while keeping PWM channels slot-specific.
     ledcTimer.speed_mode = LEDC_LOW_SPEED_MODE;
     ledcTimer.duty_resolution = PWM_RESOLUTION_BITS;
     ledcTimer.timer_num = LEDC_TIMER_0;
@@ -162,7 +190,7 @@ esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config)
     err = ledc_timer_config(&ledcTimer);
     if (err != ESP_OK)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return err;
     }
 
@@ -171,43 +199,44 @@ esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config)
     ledcChannel.sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD;
 
     ledcChannel.gpio_num = config->redGpioPin;
-    ledcChannel.channel = LEDC_CHANNEL_0;
+    ledcChannel.channel = controller->firstChannel;
     err = ledc_channel_config(&ledcChannel);
     if (err != ESP_OK)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return err;
     }
 
     ledcChannel.gpio_num = config->greenGpioPin;
-    ledcChannel.channel = LEDC_CHANNEL_1;
+    ledcChannel.channel = static_cast<ledc_channel_t>(controller->firstChannel + 1);
     err = ledc_channel_config(&ledcChannel);
     if (err != ESP_OK)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return err;
     }
 
     ledcChannel.gpio_num = config->blueGpioPin;
-    ledcChannel.channel = LEDC_CHANNEL_2;
+    ledcChannel.channel = static_cast<ledc_channel_t>(controller->firstChannel + 2);
     err = ledc_channel_config(&ledcChannel);
     if (err != ESP_OK)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return err;
     }
 
-    sController.queue = xQueueCreate(QUEUE_LENGTH, sizeof(Command_t));
-    if (!sController.queue)
+    // Create the queue before starting the task that consumes it.
+    controller->queue = xQueueCreate(QUEUE_LENGTH, sizeof(Command_t));
+    if (!controller->queue)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return ESP_ERR_NO_MEM;
     }
 
-    sController.task = taskCreate(rgbLedTask, "LedStrip5050", 3072, nullptr, 4, tskNO_AFFINITY);
-    if (!sController.task)
+    controller->task = taskCreate(rgbLedTask, "LedStrip5050", 3072, controller, 4, tskNO_AFFINITY);
+    if (!controller->task)
     {
-        ledStrip5050Deinit();
+        ledStrip5050Deinit(slot);
         return ESP_ERR_NO_MEM;
     }
 
@@ -215,119 +244,156 @@ esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config)
     return ESP_OK;
 }
 
-void ledStrip5050Deinit()
+void ledStrip5050Deinit(size_t slot)
 {
-    if (sController.task)
+    Controller_t* controller;
+
+    if (slot >= LED5050_MAX_CONTROLLERS)
     {
-        taskJoin(sController.task);
-        sController.task = nullptr;
+        return;
+    }
+    controller = sControllers[slot];
+    if (!controller)
+    {
+        return;
     }
 
-    applyColor(0, 0, 0);
-
-    if (sController.queue)
+    // Stop the worker before deleting its queue or releasing PWM resources.
+    if (controller->task)
     {
-        vQueueDelete(sController.queue);
-        sController.queue = nullptr;
+        taskJoin(controller->task);
+        controller->task = nullptr;
     }
 
-    if (redGpioPin != GPIO_NUM_NC)
+    applyColor(controller, 0, 0, 0);
+
+    if (controller->queue)
     {
-        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, isActiveLow ? 1 : 0);
-        gpioPinManagerRelease(redGpioPin);
-        redGpioPin = GPIO_NUM_NC;
+        vQueueDelete(controller->queue);
+        controller->queue = nullptr;
     }
-    if (greenGpioPin != GPIO_NUM_NC)
+
+    // Return every pin and channel owned by this slot to its inactive state.
+    if (controller->redGpioPin != GPIO_NUM_NC)
     {
-        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, isActiveLow ? 1 : 0);
-        gpioPinManagerRelease(greenGpioPin);
-        greenGpioPin = GPIO_NUM_NC;
+        ledc_stop(LEDC_LOW_SPEED_MODE, controller->firstChannel, controller->isActiveLow ? 1 : 0);
+        gpioPinManagerRelease(controller->redGpioPin);
+        controller->redGpioPin = GPIO_NUM_NC;
     }
-    if (blueGpioPin != GPIO_NUM_NC)
+    if (controller->greenGpioPin != GPIO_NUM_NC)
     {
-        ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, isActiveLow ? 1 : 0);
-        gpioPinManagerRelease(blueGpioPin);
-        blueGpioPin = GPIO_NUM_NC;
+        ledc_stop(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 1), controller->isActiveLow ? 1 : 0);
+        gpioPinManagerRelease(controller->greenGpioPin);
+        controller->greenGpioPin = GPIO_NUM_NC;
     }
-    isActiveLow = false;
+    if (controller->blueGpioPin != GPIO_NUM_NC)
+    {
+        ledc_stop(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 2), controller->isActiveLow ? 1 : 0);
+        gpioPinManagerRelease(controller->blueGpioPin);
+        controller->blueGpioPin = GPIO_NUM_NC;
+    }
+    controller->isActiveLow = false;
+    sControllers[slot] = nullptr;
+    free(controller);
 }
 
-esp_err_t ledStrip5050Set(uint16_t r, uint16_t g, uint16_t b)
+esp_err_t ledStrip5050Set(size_t slot, uint16_t r, uint16_t g, uint16_t b)
 {
+    Controller_t* controller;
     Command_t cmd;
 
-    if (!sController.task)
+    if (slot >= LED5050_MAX_CONTROLLERS)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    controller = sControllers[slot];
+
+    if (!controller || !controller->task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The FreeRTOS queue serializes concurrent command producers.
     cmd.type = CMD_SET;
-    cmd.color.r = r;
-    cmd.color.g = g;
-    cmd.color.b = b;
-    return (xQueueSend(sController.queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
+    cmd.color = rgbColorTo8(r, g, b);
+    return (xQueueSend(controller->queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
-esp_err_t ledStrip5050FadeTo(uint16_t r, uint16_t g, uint16_t b, uint32_t ms)
+esp_err_t ledStrip5050FadeTo(size_t slot, uint16_t r, uint16_t g, uint16_t b, uint32_t ms)
 {
+    Controller_t* controller;
     Command_t cmd;
 
-    if (!sController.task)
+    if (slot >= LED5050_MAX_CONTROLLERS)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    controller = sControllers[slot];
+
+    if (!controller || !controller->task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The FreeRTOS queue serializes concurrent command producers.
     cmd.type = CMD_FADE_TO;
-    cmd.target.r = r;
-    cmd.target.g = g;
-    cmd.target.b = b;
+    cmd.target = rgbColorTo8(r, g, b);
     cmd.timeMs = ms;
-    return (xQueueSend(sController.queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
+    return (xQueueSend(controller->queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
-esp_err_t ledStrip5050SetAndFadeTo(uint16_t rStart, uint16_t gStart, uint16_t bStart, uint16_t rEnd, uint16_t gEnd, uint16_t bEnd,
-                                   uint32_t ms)
+esp_err_t ledStrip5050SetAndFadeTo(size_t slot, uint16_t rStart, uint16_t gStart, uint16_t bStart, uint16_t rEnd, uint16_t gEnd,
+                                    uint16_t bEnd, uint32_t ms)
 {
+    Controller_t* controller;
     Command_t cmd;
 
-    if (!sController.task)
+    if (slot >= LED5050_MAX_CONTROLLERS)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    controller = sControllers[slot];
+
+    if (!controller || !controller->task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The FreeRTOS queue serializes concurrent command producers.
     cmd.type = CMD_SET_AND_FADE_TO;
-    cmd.color.r = rStart;
-    cmd.color.g = gStart;
-    cmd.color.b = bStart;
-    cmd.target.r = rEnd;
-    cmd.target.g = gEnd;
-    cmd.target.b = bEnd;
+    cmd.color = rgbColorTo8(rStart, gStart, bStart);
+    cmd.target = rgbColorTo8(rEnd, gEnd, bEnd);
     cmd.timeMs = ms;
-    return (xQueueSend(sController.queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
+    return (xQueueSend(controller->queue, &cmd, pdMS_TO_TICKS(MAX_CMD_WAIT_TIMEOUT_MS)) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 // -----------------------------------------------------------------------------
+// Worker implementation
 
-static void rgbLedTask(Task_t task, void*)
+static void rgbLedTask(Task_t task, void* arg)
 {
-    RGBColor_t current;
-    RGBColor_t start;
-    RGBColor_t target;
+    Controller_t* controller = static_cast<Controller_t*>(arg);
+    RGBColor8_t current;
+    RGBColor8_t start;
+    RGBColor8_t target;
     bool fadeActive = false;
     TickType_t fadeStartTick = 0;
     uint32_t fadeTimeMs = 0;
 
-    current.r = current.g = current.b = 0xFFFFU;
+    taskSignalContinue(task);
+
+    current.r = current.g = current.b = 0xFFU;
     start = current;
     target = current;
-    applyColor(current.r, current.g, current.b);
+    applyColor(controller, current.r, current.g, current.b);
 
+    // The worker exclusively owns animation state and PWM writes.
     while (!taskShouldQuit(task))
     {
         Command_t cmd;
         BaseType_t rc;
 
-        rc = xQueueReceive(sController.queue, &cmd, pdMS_TO_TICKS(LED_UPDATE_PERIOD_MS));
+        rc = xQueueReceive(controller->queue, &cmd, pdMS_TO_TICKS(LED_UPDATE_PERIOD_MS));
         if (rc == pdTRUE)
         {
             switch (cmd.type)
@@ -338,7 +404,7 @@ static void rgbLedTask(Task_t task, void*)
                     target = current;
                     fadeTimeMs = 0;
                     fadeActive = false;
-                    applyColor(current.r, current.g, current.b);
+                    applyColor(controller, current.r, current.g, current.b);
                     break;
 
                 case CMD_FADE_TO:
@@ -349,7 +415,7 @@ static void rgbLedTask(Task_t task, void*)
                         current = cmd.target;
                         target = current;
                         fadeActive = false;
-                        applyColor(current.r, current.g, current.b);
+                        applyColor(controller, current.r, current.g, current.b);
                     }
                     else
                     {
@@ -375,7 +441,7 @@ static void rgbLedTask(Task_t task, void*)
                         fadeActive = true;
                     }
                     start = current;
-                    applyColor(current.r, current.g, current.b);
+                    applyColor(controller, current.r, current.g, current.b);
                     break;
             }
         }
@@ -391,30 +457,31 @@ static void rgbLedTask(Task_t task, void*)
             }
             else
             {
-                current = rgbInterpolate(&start, &target, elapsedMs, fadeTimeMs);
+                current = rgbInterpolate8(&start, &target, elapsedMs, fadeTimeMs);
             }
 
-            applyColor(current.r, current.g, current.b);
+            applyColor(controller, current.r, current.g, current.b);
         }
     }
 }
 
-static void applyColor(uint16_t r, uint16_t g, uint16_t b)
+static void applyColor(Controller_t* controller, uint8_t r, uint8_t g, uint8_t b)
 {
-    r >>= 4;
-    g >>= 4;
-    b >>= 4;
-    if (isActiveLow)
+    uint16_t redDuty = static_cast<uint16_t>((static_cast<uint32_t>(r) * 4095U + 127U) / 255U);
+    uint16_t greenDuty = static_cast<uint16_t>((static_cast<uint32_t>(g) * 4095U + 127U) / 255U);
+    uint16_t blueDuty = static_cast<uint16_t>((static_cast<uint32_t>(b) * 4095U + 127U) / 255U);
+
+    if (controller->isActiveLow)
     {
-        r = 4095 - r;
-        g = 4095 - g;
-        b = 4095 - b;
+        redDuty = 4095U - redDuty;
+        greenDuty = 4095U - greenDuty;
+        blueDuty = 4095U - blueDuty;
     }
 
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, r);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, g);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, b);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, controller->firstChannel, redDuty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, controller->firstChannel);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 1), greenDuty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 1));
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 2), blueDuty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(controller->firstChannel + 2));
 }

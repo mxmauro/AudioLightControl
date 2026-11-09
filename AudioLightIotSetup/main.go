@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"os"
 
 	"AudioLightIotSetup/app"
@@ -11,12 +13,6 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
-
-// //go:embed build/icon.png
-// var appIcon []byte
-
-// //go:embed wails.json
-// var wailsConfigJSON []byte
 
 // -----------------------------------------------------------------------------
 
@@ -29,7 +25,7 @@ func main() {
 func _main() bool {
 	// Run application
 	err := app.Run(assets)
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return false
 	}
 

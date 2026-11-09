@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://v3.wails.io/schemas/wails.v3.json
+version: 3
+project:
+  name: AudioLightIoTSetup
+  product_name: AudioLight IoT Setup
+  identifier: io.github.mxmauro.audiolightiotsetup
+  version: 1.0.0
+  company: Mauro H. Leggieri
+  binary_name: AudioLightIoTSetup
+  icon: resources/app_icon.png
+  copyright: Copyright (C) Mauro H. Leggieri, 2026
+  supported_platforms: [windows]
+frontend:
+  directory: frontend
+  install: [npm, install]
+  build: [npm, run, build]
+  dev: [npm, run, dev]
+  output: dist
+  bindings:
+    output: src/bindings
+build:
+  output: build

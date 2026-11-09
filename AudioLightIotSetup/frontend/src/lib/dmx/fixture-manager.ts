@@ -1,5 +1,4 @@
-import type { storage } from '../../generated/wailsjs/go/models';
-import { Load, Save } from '../../generated/wailsjs/go/storage/Storage';
+import { StorageService } from '../../bindings/AudioLightIotSetup/app';
 import { DMX_SPECIAL_CHANNELS, type DmxColoring, type DmxSpecialChannel, isDmxSpecialChannel } from '../device-config';
 
 const PREDEFINED_FIXTURES_FILENAME = 'predefined_dmx.json';
@@ -26,21 +25,18 @@ export class DmxFixtureManager {
 
 	public async load(): Promise<void> {
 		// Read the persisted preset collection before deciding whether first-run defaults are needed.
-		const result = (await Load(PREDEFINED_FIXTURES_FILENAME)) as storage.LoadResult;
-		if (result.Error === 'not found') {
+		try {
+			// Decode and validate the persisted fixture data before exposing it to the UI.
+			this.fixtures = parseFixtures(await StorageService.Load(PREDEFINED_FIXTURES_FILENAME));
+		} catch (error) {
+			if (!isFileNotFound(error)) {
+				throw new Error(`Load predefined DMX fixtures: ${errorMessage(error)}`);
+			}
+
 			// Make the first-run fixture available immediately and persist it for later editing.
 			this.fixtures = [defaultFixture()];
 			await this.save();
-			return;
 		}
-
-		// Surface storage failures without treating them as an empty fixture collection.
-		if (result.Error) {
-			throw new Error(`Load predefined DMX fixtures: ${result.Error}`);
-		}
-
-		// Decode and validate the persisted fixture data before exposing it to the UI.
-		this.fixtures = parseFixtures(result.Content);
 	}
 
 	public all(): DmxFixturePreset[] {
@@ -125,9 +121,10 @@ export class DmxFixtureManager {
 		const fixtures: StoredFixtures = {
 			fixtures: this.fixtures.map((fixture) => ({ type: fixture.type, channels: fixture.coloring.map(formatChannel) }))
 		};
-		const error = await Save(PREDEFINED_FIXTURES_FILENAME, JSON.stringify(fixtures, null, '\t'));
-		if (error) {
-			throw new Error(`Save predefined DMX fixtures: ${error}`);
+		try {
+			await StorageService.Save(PREDEFINED_FIXTURES_FILENAME, JSON.stringify(fixtures, null, '\t'));
+		} catch (error) {
+			throw new Error(`Save predefined DMX fixtures: ${errorMessage(error)}`);
 		}
 	}
 
@@ -271,3 +268,7 @@ const isAsciiWhitespace = (character: number): boolean => {
 const equalTypes = (left: string, right: string): boolean => {
 	return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 };
+
+const isFileNotFound = (error: unknown): boolean => error instanceof Error && error.message === 'file not found';
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));

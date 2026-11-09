@@ -1,4 +1,6 @@
 <script lang="ts">
+import EyeIcon from '@lucide/svelte/icons/eye';
+import EyeOffIcon from '@lucide/svelte/icons/eye-off';
 import FingerprintIcon from '@lucide/svelte/icons/fingerprint';
 import { decodeBase64Key, getLastHost, isValidHost, normalizeHost } from '../lib/session';
 import { errorMessage } from '../lib/ui';
@@ -15,6 +17,7 @@ let {
 let host = $state(getLastHost());
 let username = $state('');
 let privateKey = $state('');
+let showPrivateKey = $state(false);
 let errors = $state<Record<string, string>>({});
 
 // -----------------------------------------------------------------------------
@@ -81,15 +84,30 @@ const openTrustedDevices = (): void => {
 				>
 				<label class="label"
 					><span class="label-text">Private key</span>
-					<input
-						class="input"
-						type="password"
-						bind:value={privateKey}
-						placeholder="Base64-encoded 32-byte key"
-						autocomplete="off"
-						disabled={busy}
-						aria-invalid={!!errors.privateKey}
-					>
+					<div class="relative">
+						<input
+							class="input !pr-12"
+							type={showPrivateKey ? 'text' : 'password'}
+							bind:value={privateKey}
+							placeholder="Base64-encoded 32-byte key"
+							autocomplete="off"
+							disabled={busy}
+							aria-invalid={!!errors.privateKey}
+						>
+						<button
+							class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
+							type="button"
+							aria-label={showPrivateKey ? 'Hide private key' : 'Show private key'}
+							disabled={busy}
+							onclick={() => (showPrivateKey = !showPrivateKey)}
+						>
+							{#if showPrivateKey}
+								<EyeOffIcon />
+							{:else}
+								<EyeIcon />
+							{/if}
+						</button>
+					</div>
 					{#if errors.privateKey}
 						<small class="text-error-600-400">{errors.privateKey}</small>
 					{/if}</label

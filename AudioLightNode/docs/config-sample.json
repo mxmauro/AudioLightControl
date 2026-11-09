@@ -1,6 +1,6 @@
 {
   "irGpio": -1,
-  "output": {
+  "lighting": {
     "type": "dmx",
     "txGpio": 3,
     "fixtures": [

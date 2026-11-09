@@ -1,6 +1,6 @@
 # DMX Fixture Channel Configuration
 
-This document defines the fixture channel mapping used by `CMD_GET_DEVICE_CONFIG` and `CMD_SET_DEVICE_CONFIG`.
+This document defines the fixture channel mapping used by `CMD_GET_LIGHTING_CONFIG` and `CMD_SET_LIGHTING_CONFIG`.
 
 The device configuration payload remains version `1`. Each fixture channel is a big-endian `uint16` coloring entry. Values from `0x0000` through `0x00FF` are fixed DMX values; the dynamic entries are listed below.
 

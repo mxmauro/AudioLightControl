@@ -49,6 +49,7 @@ HRESULT CTUiWindowManager::Initialize(_In_ InitParams_t &sInitParams) noexcept
     if (RegisterClassExW(&sWcExW) == FALSE)
     {
         hRes = HRESULT_FROM_WIN32(GetLastError());
+        memset(m_szWndClassNameW, 0, sizeof(m_szWndClassNameW));
         Cleanup();
         return hRes;
     }
@@ -114,7 +115,7 @@ HRESULT CTUiWindowManager::ProcessMessages(_In_opt_ BOOL bWaitForMessage) noexce
     {
         if (!PeekMessageW(&sMsg, nullptr, 0, 0, PM_REMOVE))
         {
-            return S_OK;
+            return S_FALSE;
         }
         if (sMsg.message == WM_QUIT)
         {
@@ -128,7 +129,7 @@ HRESULT CTUiWindowManager::ProcessMessages(_In_opt_ BOOL bWaitForMessage) noexce
         {
             return HRESULT_FROM_WIN32(GetLastError());
         }
-        if (res == 0)
+        if (res == 0) // WM_QUIT
         {
             return static_cast<HRESULT>(sMsg.wParam);
         }
@@ -138,7 +139,7 @@ HRESULT CTUiWindowManager::ProcessMessages(_In_opt_ BOOL bWaitForMessage) noexce
     DispatchMessageW(&sMsg);
 
     // Done
-    return S_OK;
+    return S_FALSE;
 }
 
 HRESULT CTUiWindowManager::AttachWindow(_In_ CTUiWindow *lpWindow, _In_ INT iX, _In_ INT iY) noexcept
@@ -262,7 +263,10 @@ HRESULT CTUiWindowManager::DetachWindow(_In_ CTUiWindow *lpWindow) noexcept
             m_bMouseCaptured = FALSE;
         }
         m_mapRegionWnd.erase(lpWindow->m_regionH);
-        m_lpGuiTerminal->DestroyRegion(lpWindow->m_regionH);
+        if (m_lpGuiTerminal)
+        {
+            m_lpGuiTerminal->DestroyRegion(lpWindow->m_regionH);
+        }
         lpWindow->m_regionH = nullptr;
     }
     lpWindow->m_hParentRegion = nullptr;
@@ -444,10 +448,9 @@ HRESULT CTUiWindowManager::EnablePerMonitorDpiAwareness() noexcept
 
 VOID CTUiWindowManager::Cleanup() noexcept
 {
-    if (m_hInstance)
+    if (m_hInstance && *m_szWndClassNameW != 0)
     {
         UnregisterClassW(m_szWndClassNameW, m_hInstance);
-        m_hInstance = nullptr;
     }
     m_hMainWnd = nullptr;
     memset(m_szWndClassNameW, 0, sizeof(m_szWndClassNameW));

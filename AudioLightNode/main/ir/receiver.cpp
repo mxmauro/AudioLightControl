@@ -1,4 +1,24 @@
 #include "ir/receiver.h"
+#include <soc/soc_caps.h>
+
+#if !defined(SOC_RMT_SUPPORTED)
+#error "IR receiver requires SOC_RMT_SUPPORTED"
+#elif !SOC_RMT_SUPPORTED
+#error "IR receiver requires RMT support on the selected target"
+#endif
+
+#include <hal/rmt_ll.h>
+
+#if !defined(RMT_LL_RX_CANDIDATES_PER_INST)
+#error "IR receiver requires RMT_LL_RX_CANDIDATES_PER_INST"
+#elif RMT_LL_RX_CANDIDATES_PER_INST < 1
+#error "IR receiver requires at least one RMT RX channel"
+#endif
+
+#if !defined(SOC_RMT_MEM_WORDS_PER_CHANNEL)
+#error "IR receiver requires SOC_RMT_MEM_WORDS_PER_CHANNEL"
+#endif
+
 #include <driver/rmt_common.h>
 #include <driver/rmt_rx.h>
 #include <esp_log.h>
@@ -11,7 +31,7 @@
 static const char* TAG = "IR-RX";
 
 #define IR_RX_RESOLUTION_HZ      1000000
-#define IR_RX_MEM_BLOCK_SYMBOLS  64
+#define IR_RX_MEM_BLOCK_SYMBOLS  SOC_RMT_MEM_WORDS_PER_CHANNEL
 #define IR_RX_TASK_STACK_SIZE    4096
 #define IR_RX_TASK_PRIORITY      4
 #define IR_RX_EVENT_QUEUE_LENGTH 4
@@ -39,6 +59,7 @@ static const char* TAG = "IR-RX";
 #define IR_RX_MAX_PULSES (IR_RX_MEM_BLOCK_SYMBOLS * 2)
 
 // -----------------------------------------------------------------------------
+// IR receive event and runtime types
 
 typedef struct IrRxEvent_s {
     size_t numSymbols;
@@ -63,6 +84,7 @@ typedef struct IrPulse_s {
 } IrPulse_t;
 
 // -----------------------------------------------------------------------------
+// Global receiver state
 
 static IrReceiverContext_t sIrReceiver = {};
 
@@ -100,6 +122,7 @@ esp_err_t irReceiverInit(gpio_num_t gpioPin, IrReceiverCodeHandler_t handler, vo
         return ESP_ERR_INVALID_STATE;
     }
 
+    // Claim the configured input before creating RMT resources.
     err = gpioPinManagerClaim(gpioPin, GpioPinUseInput, "IR receiver");
     if (err != ESP_OK)
     {
@@ -111,6 +134,7 @@ esp_err_t irReceiverInit(gpio_num_t gpioPin, IrReceiverCodeHandler_t handler, vo
     sIrReceiver.handler = handler;
     sIrReceiver.handlerCtx = ctx;
 
+    // Create the queue before arming callbacks that publish into it.
     sIrReceiver.eventQueue = xQueueCreate(IR_RX_EVENT_QUEUE_LENGTH, sizeof(IrRxEvent_t));
     if (!sIrReceiver.eventQueue)
     {
@@ -159,6 +183,7 @@ void irReceiverDeinit()
 {
     esp_err_t err;
 
+    // Stop the receive path before deleting its queue and channel.
     if (sIrReceiver.channel)
     {
         err = rmt_disable(sIrReceiver.channel);
@@ -202,6 +227,7 @@ void irReceiverDeinit()
 }
 
 // -----------------------------------------------------------------------------
+// Receive worker and protocol parser
 
 static void irReceiverTask(Task_t task, void* arg)
 {
@@ -216,6 +242,7 @@ static void irReceiverTask(Task_t task, void* arg)
 
     static_cast<void>(arg);
 
+    // Arm the first receive before waiting for callback-delivered events.
     err = rmt_receive(sIrReceiver.channel, sIrReceiver.rawSymbols, sizeof(sIrReceiver.rawSymbols), &receiveConfig);
     if (err != ESP_OK)
     {

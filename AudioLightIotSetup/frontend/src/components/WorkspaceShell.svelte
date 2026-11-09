@@ -1,6 +1,7 @@
 <script lang="ts">
 import LightbulbIcon from '@lucide/svelte/icons/lightbulb';
 import LogOutIcon from '@lucide/svelte/icons/log-out';
+import PowerIcon from '@lucide/svelte/icons/power';
 import RotateCcwKeyIcon from '@lucide/svelte/icons/rotate-ccw-key';
 import ServerCogIcon from '@lucide/svelte/icons/server-cog';
 import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
@@ -15,6 +16,7 @@ import ConfirmationDialog from './ConfirmationDialog.svelte';
 // -----------------------------------------------------------------------------
 
 export type View =
+	| 'input'
 	| 'lighting'
 	| 'dmx-fixtures'
 	| 'hostname'
@@ -27,7 +29,13 @@ export type View =
 // -----------------------------------------------------------------------------
 
 const navigationGroups: { label: string; items: { view: View; label: string }[] }[] = [
-	{ label: 'Device', items: [{ view: 'lighting', label: 'Lighting configuration' }] },
+	{
+		label: 'Device',
+		items: [
+			{ view: 'input', label: 'Input configuration' },
+			{ view: 'lighting', label: 'Lighting configuration' }
+		]
+	},
 	{
 		label: 'Users',
 		items: [
@@ -56,6 +64,7 @@ let {
 	busy = false,
 	onnavigate,
 	onlogout,
+	onreboot,
 	children
 }: {
 	client: Client;
@@ -64,9 +73,11 @@ let {
 	busy?: boolean;
 	onnavigate: (view: View) => void;
 	onlogout: () => void;
+	onreboot: () => void;
 	children: import('svelte').Snippet;
 } = $props();
 let confirmingLogout = $state(false);
+let confirmingReboot = $state(false);
 
 // -----------------------------------------------------------------------------
 
@@ -87,6 +98,10 @@ const navigate = (event: MouseEvent, view: View): void => {
 const requestLogout = (): void => {
 	confirmingLogout = true;
 };
+
+const requestReboot = (): void => {
+	confirmingReboot = true;
+};
 </script>
 
 <div class="flex h-full min-h-0 flex-col md:grid md:grid-cols-[17.5rem_1fr]">
@@ -106,7 +121,9 @@ const requestLogout = (): void => {
 									tabindex={isNavigationDisabled(item.view) ? -1 : undefined}
 									onclick={(event: MouseEvent) => navigate(event, item.view)}
 								>
-									{#if item.view === 'lighting'}
+									{#if item.view === 'input'}
+										<SlidersHorizontalIcon class="shrink-0" />
+									{:else if item.view === 'lighting'}
 										<LightbulbIcon class="shrink-0" />
 									{:else if item.view === 'hostname'}
 										<ServerCogIcon class="shrink-0" />
@@ -131,6 +148,15 @@ const requestLogout = (): void => {
 				{/each}
 			</Navigation.Content>
 			<Navigation.Footer class="flex flex-col justify-end px-6 pb-4">
+				<button
+					class="btn preset-filled-warning-500 mb-2 w-full justify-start"
+					type="button"
+					disabled={busy || !isAdministrator || client.mustChangeCredentials}
+					onclick={requestReboot}
+				>
+					<PowerIcon />
+					Reboot device
+				</button>
 				<button class="btn preset-filled-error-500 w-full justify-start" type="button" disabled={busy} onclick={requestLogout}>
 					<LogOutIcon />
 					Logout
@@ -139,7 +165,7 @@ const requestLogout = (): void => {
 		</Navigation>
 	</aside>
 	<main class="min-h-0 flex-1 overflow-y-auto p-4 md:p-8">
-		{#if activeView === 'lighting' || activeView === 'dmx-fixtures'}
+		{#if activeView === 'input' || activeView === 'lighting' || activeView === 'dmx-fixtures'}
 			<div class="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col">{@render children()}</div>
 		{:else}
 			<div class="mx-auto flex min-h-full w-full max-w-5xl flex-col justify-center gap-6">{@render children()}</div>
@@ -155,5 +181,16 @@ const requestLogout = (): void => {
 		{busy}
 		oncancel={() => (confirmingLogout = false)}
 		onconfirm={onlogout}
+	/>
+{/if}
+
+{#if confirmingReboot}
+	<ConfirmationDialog
+		title="Reboot device"
+		summary="Reboot now? Saved input and lighting configuration will become active, and this session will close."
+		busyLabel="Rebooting device…"
+		{busy}
+		oncancel={() => (confirmingReboot = false)}
+		onconfirm={onreboot}
 	/>
 {/if}

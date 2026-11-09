@@ -13,7 +13,7 @@
 		}
 	},
 	"files": {
-		"includes": ["src/**/*", "!src/generated/**/*"],
+		"includes": ["src/**/*", "!src/bindings/**/*"],
 		"ignoreUnknown": false
 	},
 	"formatter": {

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 // -----------------------------------------------------------------------------
+// HSV color type
 
 typedef struct HSVColor_s {
     uint16_t h;

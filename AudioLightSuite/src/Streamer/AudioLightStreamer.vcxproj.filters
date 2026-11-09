@@ -19,6 +19,12 @@
     <Filter Include="Header Files\Devices">
       <UniqueIdentifier>{3B862723-9415-4278-A8F7-C50939384B0E}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Lighting">
+      <UniqueIdentifier>{A34A4757-6461-4F08-BDE6-7D7A88D3CA9D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Lighting">
+      <UniqueIdentifier>{E901D1AB-04C8-42B1-A36C-8785F5CE3DB9}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\Processors">
       <UniqueIdentifier>{8BBB93DC-D6E6-4CC9-85C0-C71015A7E2B3}</UniqueIdentifier>
     </Filter>
@@ -102,23 +108,29 @@
     <ClCompile Include="AudioCapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\BaseIotDevice.cpp">
+    <ClCompile Include="Lighting\BaseLighting.cpp">
+      <Filter>Source Files\Lighting</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\AudioLightNodeDevice.cpp">
       <Filter>Source Files\Devices</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\AudioLightNodeIotDevice.cpp">
+    <ClCompile Include="Lighting\DmxLighting.cpp">
+      <Filter>Source Files\Lighting</Filter>
+    </ClCompile>
+    <ClCompile Include="Lighting\GoveeStripLighting.cpp">
+      <Filter>Source Files\Lighting</Filter>
+    </ClCompile>
+    <ClCompile Include="Devices\GoveeStripDevice.cpp">
       <Filter>Source Files\Devices</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\DmxIotDevice.cpp">
-      <Filter>Source Files\Devices</Filter>
+    <ClCompile Include="Lighting\Rgb5050Lighting.cpp">
+      <Filter>Source Files\Lighting</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\GoveeStripIotDevice.cpp">
-      <Filter>Source Files\Devices</Filter>
+    <ClCompile Include="Lighting\Ws281xLighting.cpp">
+      <Filter>Source Files\Lighting</Filter>
     </ClCompile>
-    <ClCompile Include="Devices\Rgb5050IotDevice.cpp">
-      <Filter>Source Files\Devices</Filter>
-    </ClCompile>
-    <ClCompile Include="Devices\SharedManualColorControl.cpp">
-      <Filter>Source Files\Devices</Filter>
+    <ClCompile Include="Lighting\SharedManualColorControl.cpp">
+      <Filter>Source Files\Lighting</Filter>
     </ClCompile>
     <ClCompile Include="Processors\BaseAudioProcessor.cpp">
       <Filter>Source Files\Processors</Filter>
@@ -222,23 +234,29 @@
     <ClInclude Include="resource.h">
       <Filter>Resource Files</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\BaseIotDevice.h">
+    <ClInclude Include="Lighting\BaseLighting.h">
+      <Filter>Header Files\Lighting</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\AudioLightNodeDevice.h">
       <Filter>Header Files\Devices</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\AudioLightNodeIotDevice.h">
+    <ClInclude Include="Lighting\DmxLighting.h">
+      <Filter>Header Files\Lighting</Filter>
+    </ClInclude>
+    <ClInclude Include="Lighting\GoveeStripLighting.h">
+      <Filter>Header Files\Lighting</Filter>
+    </ClInclude>
+    <ClInclude Include="Devices\GoveeStripDevice.h">
       <Filter>Header Files\Devices</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\DmxIotDevice.h">
-      <Filter>Header Files\Devices</Filter>
+    <ClInclude Include="Lighting\Rgb5050Lighting.h">
+      <Filter>Header Files\Lighting</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\GoveeStripIotDevice.h">
-      <Filter>Header Files\Devices</Filter>
+    <ClInclude Include="Lighting\Ws281xLighting.h">
+      <Filter>Header Files\Lighting</Filter>
     </ClInclude>
-    <ClInclude Include="Devices\Rgb5050IotDevice.h">
-      <Filter>Header Files\Devices</Filter>
-    </ClInclude>
-    <ClInclude Include="Devices\SharedManualColorControl.h">
-      <Filter>Header Files\Devices</Filter>
+    <ClInclude Include="Lighting\SharedManualColorControl.h">
+      <Filter>Header Files\Lighting</Filter>
     </ClInclude>
     <ClInclude Include="Processors\BaseAudioProcessor.h">
       <Filter>Header Files\Processors</Filter>

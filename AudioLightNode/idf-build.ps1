@@ -105,20 +105,25 @@ try {
         }
 
         'build' {
-            & python $idfPy --preset $preset -D "IDF_TARGET=$target" build
+            & python $idfPy --preset $preset build
         }
 
         'flash' {
-            $flashCommands = @()
             if ($Erase) {
-                $flashCommands += 'erase-flash'
-            }
-            $flashCommands += 'flash'
-            if (-not $NoMonitor) {
-                $flashCommands += 'monitor'
+                & python $idfPy --preset $preset -p $Port erase-flash
+                if ($LASTEXITCODE -ne 0) {
+                    exit $LASTEXITCODE
+                }
             }
 
-            & python $idfPy --preset $preset -p $Port @flashCommands
+            & python $idfPy --preset $preset -p $Port flash --all
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
+
+            if (-not $NoMonitor) {
+                & python $idfPy --preset $preset -p $Port monitor
+            }
         }
 
         'monitor' {

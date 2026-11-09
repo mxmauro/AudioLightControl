@@ -1263,7 +1263,9 @@ static std::map<std::wstring, std::wstring> ParseResponseHeaders(_In_ const std:
     {
         size_t lineEnd = strRawHeaders.find(L"\r\n", pos);
         if (lineEnd == std::wstring::npos)
+        {
             break;
+        }
 
         std::wstring line = strRawHeaders.substr(pos, lineEnd - pos);
         size_t colon = line.find(L':');
@@ -1420,7 +1422,9 @@ static void TrimSpacesAndNewLines(_Inout_ std::wstring &s)
         --e;
     }
     if (b == 0 && e == s.size())
+    {
         return;
+    }
 
     s.assign(s.begin() + static_cast<std::ptrdiff_t>(b),
              s.begin() + static_cast<std::ptrdiff_t>(e));
@@ -1439,12 +1443,16 @@ static bool IsValidHeaderNameChar(_In_ wchar_t ch) noexcept
 static bool IsValidHeaderName(_In_ const std::wstring &name) noexcept
 {
     if (name.empty())
+    {
         return false;
+    }
 
     for (wchar_t ch : name)
     {
         if (!IsValidHeaderNameChar(ch))
+        {
             return false;
+        }
     }
     return true;
 }
@@ -1455,11 +1463,15 @@ static bool IsValidHeaderValue(_In_ const std::wstring &value) noexcept
     for (wchar_t ch : value)
     {
         if (ch == L'\r' || ch == L'\n')
+        {
             return false;
+        }
 
         // Disallow ASCII control chars except HTAB; also disallow DEL.
         if ((ch < 0x20 && ch != L'\t') || ch == 0x7F)
+        {
             return false;
+        }
     }
     return true;
 }

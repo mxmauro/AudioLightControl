@@ -7,6 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// -----------------------------------------------------------------------------
+// DMX limits and channel semantics
+
 #define DMX_MAX_CHANNELS               128
 #define DMX_MAX_FIXTURES               16
 #define DMX_FIXTURE_MAX_TYPE_LEN       32
@@ -36,6 +39,9 @@
 #define DMX_COLORING_VALUE_DIMMER_COARSE DMX_COLORING_VALUE_DIMMER
 #define DMX_COLORING_VALUE_PAN_COARSE    DMX_COLORING_VALUE_PAN
 #define DMX_COLORING_VALUE_TILT_COARSE   DMX_COLORING_VALUE_TILT
+
+// -----------------------------------------------------------------------------
+// DMX configuration types
 
 typedef struct DmxFixtureConfig_s {
     char type[DMX_FIXTURE_MAX_TYPE_LEN + 1];

@@ -3,75 +3,58 @@ import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 import ChevronsDownIcon from '@lucide/svelte/icons/chevrons-down';
 import XIcon from '@lucide/svelte/icons/x';
+import { Window } from '@wailsio/runtime';
 import { onMount } from 'svelte';
 
 // -----------------------------------------------------------------------------
 
-type WailsRuntime = {
-	Quit: () => void;
-	WindowIsMaximised: () => Promise<boolean>;
-	WindowMaximise: () => void;
-	WindowMinimise: () => void;
-	WindowUnmaximise: () => void;
-};
-type WailsRuntimeWindow = Window & { runtime?: WailsRuntime };
+type WailsWindow = globalThis.Window & { wails?: unknown };
 
 // -----------------------------------------------------------------------------
 
 let maximised = $state(false);
 let runningInWails = $state(false);
-let { onquit }: { onquit: () => void } = $props();
 
 // -----------------------------------------------------------------------------
 
-const getWailsRuntime = (): WailsRuntime | undefined => {
-	// Access desktop-only window controls without assuming the page runs inside Wails.
-	if (typeof window === 'undefined') {
-		return undefined;
-	}
-	return (window as WailsRuntimeWindow).runtime;
-};
-
 const updateMaximisedState = async (): Promise<void> => {
 	// Synchronize the visual maximize control with the native window state.
-	const runtime = getWailsRuntime();
-	if (!runtime) {
-		maximised = false;
-		return;
-	}
-	maximised = await runtime.WindowIsMaximised();
+	maximised = await Window.IsMaximised();
 };
 
 const minimise = (): void => {
-	getWailsRuntime()?.WindowMinimise();
+	void Window.Minimise();
 };
 
 const toggleMaximise = async (): Promise<void> => {
-	// Toggle the native desktop window and update local state only after the runtime is available.
-	const runtime = getWailsRuntime();
-	if (!runtime) {
-		return;
-	}
-	if (await runtime.WindowIsMaximised()) {
-		runtime.WindowUnmaximise();
+	// Toggle the native desktop window and keep the icon synchronized with the resulting state.
+	if (await Window.IsMaximised()) {
+		await Window.UnMaximise();
 		maximised = false;
 		return;
 	}
-	runtime.WindowMaximise();
+	await Window.Maximise();
 	maximised = true;
 };
 
 const quit = (): void => {
-	onquit();
+	// Closing through the runtime enters the same native close guard as Alt+F4 and the window's close button.
+	void Window.Close();
+};
+
+const updateRuntimeAvailability = (): void => {
+	// Wails injects window.wails before page scripts; the event covers a runtime that finishes configuring after mount.
+	runningInWails = (window as WailsWindow).wails !== undefined;
+	if (runningInWails) {
+		void updateMaximisedState();
+	}
 };
 
 onMount(() => {
 	// Enable native window controls only when this frontend is hosted by Wails.
-	runningInWails = window.isWails();
-	if (!runningInWails) {
-		return;
-	}
-	void updateMaximisedState();
+	updateRuntimeAvailability();
+	window.addEventListener('wails:runtime-config-ready', updateRuntimeAvailability);
+	return () => window.removeEventListener('wails:runtime-config-ready', updateRuntimeAvailability);
 });
 </script>
 
@@ -79,7 +62,7 @@ onMount(() => {
 	<div class="flex h-14 w-full items-center justify-between px-3">
 		<strong class="cursor-default text-lg" style="--wails-draggable: drag">AudioLight IoT Setup</strong>
 		{#if runningInWails}
-			<div class="flex items-center gap-1">
+			<div class="flex items-center gap-1" style="--wails-draggable: no-drag">
 				<button class="btn btn-icon preset-filled-surface-500" type="button" aria-label="Minimise window" onclick={minimise}>
 					<ChevronDownIcon />
 				</button>

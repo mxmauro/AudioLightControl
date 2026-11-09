@@ -1,8 +1,6 @@
 #include "AppConfig.h"
 #include "CommandLine.h"
 #include "Crypto\Base64.h"
-#include "Devices\DmxIotDevice.h"
-#include "Devices\GoveeStripIotDevice.h"
 #include "IotComm\IotCommClient.h"
 #pragma warning(disable : 26819)
 #include "ThirdParty\nlohmann_json\json.hpp"
@@ -11,6 +9,7 @@
 #include "Utils\WindowsHandle.h"
 #include <windns.h>
 #include <WS2tcpip.h>
+#include <algorithm>
 #include <cwctype>
 #include <stdexcept>
 #include <string>
@@ -81,167 +80,204 @@ HRESULT ReadAppConfig()
             j = nlohmann::json::parse(fileData.begin(), fileData.end(), nullptr, true, true);
         }
 
-        // The root device list is the required application configuration entry point.
-        if (!(j.is_object() && j.contains("devices") && j["devices"].is_array()))
+        if (!(j.is_object() && j.contains("devices") && j["devices"].is_array() && !j["devices"].empty()))
         {
-            ThrowConfigurationError("The root object must contain a \"devices\" array.");
-        }
-        if (j["devices"].empty())
-        {
-            ThrowConfigurationError("The \"devices\" array must contain at least one device.");
+            ThrowConfigurationError("The root object must contain a non-empty \"devices\" array.");
         }
 
         for (SIZE_T nDeviceIndex = 0; nDeviceIndex < j["devices"].size(); nDeviceIndex++)
         {
             const nlohmann::json &jDevice = j["devices"][nDeviceIndex];
+            std::vector<const nlohmann::json *> vecLightingJson;
             CConfig::Device device;
-            std::string strType, strHost, strUserName, strPrivateKey, strName;
-            BOOL bRequiresAudioLightNodeCredentials = FALSE;
+            std::string strName, strHost, strUserName, strPrivateKey;
+            BOOL bGovee = FALSE;
+            SIZE_T nDmxCount = 0;
 
-            if (!(jDevice.is_object() &&
-                  jDevice.contains("name") && jDevice["name"].is_string() &&
-                  jDevice.contains("type") && jDevice["type"].is_string() &&
-                  jDevice.contains("host") && jDevice["host"].is_string()))
+            if (!(jDevice.is_object() && jDevice.contains("name") && jDevice["name"].is_string() &&
+                  jDevice.contains("host") && jDevice["host"].is_string() && jDevice.contains("lighting")))
             {
-                ThrowDeviceConfigurationError(nDeviceIndex, "must define string name, type, and host fields.");
+                ThrowDeviceConfigurationError(nDeviceIndex, "must define string name and host fields plus lighting.");
             }
-
-            strName = jDevice["name"].get<std::string>();
-            strType = jDevice["type"].get<std::string>();
-            strHost = jDevice["host"].get<std::string>();
-
-            if (strType == "rgb5050")
+            if (jDevice["lighting"].is_object())
             {
-                if (!jDevice.contains("effect"))
-                {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "with type \"rgb5050\" requires an effect.");
-                }
-
-                ParseEffects(jDevice["effect"], device.vecEffects);
-                device.eType = CConfig::DeviceType::Rgb5050;
-                bRequiresAudioLightNodeCredentials = TRUE;
+                vecLightingJson.push_back(&jDevice["lighting"]);
             }
-            else if (strType == "dmx")
+            else if (jDevice["lighting"].is_array() && !jDevice["lighting"].empty() && jDevice["lighting"].size() <= 2)
             {
-                // Named fixtures are reconciled with the device later; only custom fixtures carry a local DMX layout.
-                if (!(jDevice.contains("fixtures") && jDevice["fixtures"].is_array() && !jDevice["fixtures"].empty()))
+                for (const nlohmann::json &jLighting : jDevice["lighting"])
                 {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "with type \"dmx\" requires a non-empty fixtures array.");
+                    vecLightingJson.push_back(&jLighting);
                 }
-
-                device.eType = CConfig::DeviceType::Dmx;
-                bRequiresAudioLightNodeCredentials = TRUE;
-                for (SIZE_T nFixtureIndex = 0; nFixtureIndex < jDevice["fixtures"].size(); nFixtureIndex++)
-                {
-                    const nlohmann::json &jFixture = jDevice["fixtures"][nFixtureIndex];
-                    CConfig::DmxFixture fixture;
-                    std::string strFixtureType;
-                    UINT64 ullStartChannel;
-
-                    if (!(jFixture.is_object() &&
-                          jFixture.contains("type") && jFixture["type"].is_string() &&
-                          jFixture.contains("effect")))
-                    {
-                        ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "must define string type and effect fields.");
-                    }
-
-                    strFixtureType = jFixture["type"].get<std::string>();
-                    Utf8ToWide(strFixtureType.c_str(), strFixtureType.length(), fixture.strType);
-                    TrimWhitespace(fixture.strType);
-                    if (fixture.strType.empty())
-                    {
-                        ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "has an empty type.");
-                    }
-
-                    ParseEffects(jFixture["effect"], fixture.vecEffects);
-                    fixture.bCustom = IsCustomDmxFixtureType(fixture.strType.c_str());
-                    fixture.bAutomatic = IsAutomaticDmxFixtureType(fixture.strType.c_str());
-                    if (fixture.bCustom != FALSE)
-                    {
-                        // A custom fixture bypasses device type matching and must describe its entire DMX channel range.
-                        if (!(jFixture.contains("startChannel") && jFixture["startChannel"].is_number_unsigned() &&
-                              jFixture.contains("channels")))
-                        {
-                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
-                                                           "with type \"custom\" requires an unsigned startChannel and a channels array.");
-                        }
-
-                        ullStartChannel = jFixture["startChannel"].get<UINT64>();
-                        if (ullStartChannel == 0 || ullStartChannel > CDmxIotDevice::DMX_UNIVERSE_SIZE)
-                        {
-                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
-                                                           "has a startChannel outside the DMX universe range of 1 through 128.");
-                        }
-
-                        ParseDmxFixtureChannels(jFixture["channels"], fixture.vecChannelMappings);
-                        if (ullStartChannel + fixture.vecChannelMappings.size() - 1 > CDmxIotDevice::DMX_UNIVERSE_SIZE)
-                        {
-                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "extends past DMX universe channel 128.");
-                        }
-
-                        fixture.nStartChannel = static_cast<USHORT>(ullStartChannel);
-                    }
-                    else if (jFixture.contains("startChannel") || jFixture.contains("channels"))
-                    {
-                        ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
-                                                       "must not define startChannel or channels unless its type is \"custom\".");
-                    }
-
-                    device.vecDmxFixtures.push_back(std::move(fixture));
-                }
-            }
-            else if (strType == "govee-strip")
-            {
-                BOOL bSupportsRazer;
-
-                if (!(jDevice.contains("supportsRazer") && jDevice["supportsRazer"].is_boolean() &&
-                      jDevice.contains("effect")))
-                {
-                    ThrowDeviceConfigurationError(nDeviceIndex,
-                                                  "with type \"govee-strip\" requires a boolean supportsRazer and an effect.");
-                }
-
-                bSupportsRazer = jDevice["supportsRazer"].get<bool>() ? TRUE : FALSE;
-                if (bSupportsRazer != FALSE)
-                {
-                    UINT64 ullStripLength;
-
-                    if (!(jDevice.contains("stripLength") && jDevice["stripLength"].is_number_unsigned()))
-                    {
-                        ThrowDeviceConfigurationError(nDeviceIndex,
-                                                      "with supportsRazer set to true requires an unsigned stripLength.");
-                    }
-
-                    ullStripLength = jDevice["stripLength"].get<UINT64>();
-                    if (ullStripLength == 0 || ullStripLength > CGoveeStripIotDevice::GOVEE_MAX_STRIP_LENGTH)
-                    {
-                        ThrowDeviceConfigurationError(nDeviceIndex, "has a stripLength outside the range of 1 through 255.");
-                    }
-
-                    device.nStripLength = static_cast<USHORT>(ullStripLength);
-                }
-                else if (jDevice.contains("stripLength"))
-                {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "must not define stripLength unless supportsRazer is true.");
-                }
-
-                ParseEffects(jDevice["effect"], device.vecEffects);
-                device.eType = CConfig::DeviceType::GoveeStrip;
-                device.bSupportsRazer = bSupportsRazer;
             }
             else
             {
-                ThrowDeviceConfigurationError(nDeviceIndex, "has an unsupported type. Use \"rgb5050\", \"dmx\", or \"govee-strip\".");
+                ThrowDeviceConfigurationError(nDeviceIndex, "lighting must be an object or an array containing one or two objects.");
             }
 
+            strName = jDevice["name"].get<std::string>();
+            strHost = jDevice["host"].get<std::string>();
             Utf8ToWide(strName.c_str(), strName.length(), device.strName);
             Utf8ToWide(strHost.c_str(), strHost.length(), device.strHost);
-
-            if (!IsValidHostnameAndPort(device.strHost.c_str()))
+            if (device.strName.empty() || !IsValidHostnameAndPort(device.strHost.c_str()))
             {
-                ThrowDeviceConfigurationError(nDeviceIndex, "has an invalid host name or port.");
+                ThrowDeviceConfigurationError(nDeviceIndex, "has an empty name or invalid host name or port.");
             }
-            if (bRequiresAudioLightNodeCredentials != FALSE)
+
+            for (SIZE_T nLightingIndex = 0; nLightingIndex < vecLightingJson.size(); nLightingIndex++)
+            {
+                const nlohmann::json &jLighting = *vecLightingJson[nLightingIndex];
+                CConfig::Lighting lighting;
+                std::string strType;
+
+                if (!(jLighting.is_object() && jLighting.contains("type") && jLighting["type"].is_string()))
+                {
+                    ThrowDeviceConfigurationError(nDeviceIndex, "contains a lighting entry without a string type.");
+                }
+                strType = jLighting["type"].get<std::string>();
+                if (strType == "rgb5050")
+                {
+                    if (!jLighting.contains("effect"))
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex, "with type \"rgb5050\" requires an effect.");
+                    }
+                    ParseEffects(jLighting["effect"], lighting.vecEffects);
+                    lighting.eType = CConfig::DeviceType::Rgb5050;
+                }
+                else if (strType == "ws281x")
+                {
+                    UINT64 ullStripLength;
+
+                    if (!(jLighting.contains("effect") && jLighting.contains("stripLength") &&
+                          jLighting["stripLength"].is_number_unsigned()))
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex, "with type \"ws281x\" requires effect and unsigned stripLength.");
+                    }
+                    ullStripLength = jLighting["stripLength"].get<UINT64>();
+                    if (ullStripLength == 0 || ullStripLength > 300)
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex, "has a WS281x stripLength outside the range of 1 through 300.");
+                    }
+                    ParseEffects(jLighting["effect"], lighting.vecEffects);
+                    lighting.eType = CConfig::DeviceType::Ws281x;
+                    lighting.bSupportsRazer = TRUE;
+                    lighting.nStripLength = static_cast<USHORT>(ullStripLength);
+                }
+                else if (strType == "dmx")
+                {
+                    if (!(jLighting.contains("fixtures") && jLighting["fixtures"].is_array() && !jLighting["fixtures"].empty()))
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex, "with type \"dmx\" requires a non-empty fixtures array.");
+                    }
+                    lighting.eType = CConfig::DeviceType::Dmx;
+                    nDmxCount++;
+                    for (SIZE_T nFixtureIndex = 0; nFixtureIndex < jLighting["fixtures"].size(); nFixtureIndex++)
+                    {
+                        const nlohmann::json &jFixture = jLighting["fixtures"][nFixtureIndex];
+                        CConfig::DmxFixture fixture;
+                        std::string strFixtureType;
+                        UINT64 ullStartChannel;
+
+                        if (!(jFixture.is_object() && jFixture.contains("type") && jFixture["type"].is_string() &&
+                              jFixture.contains("effect")))
+                        {
+                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "must define string type and effect fields.");
+                        }
+                        strFixtureType = jFixture["type"].get<std::string>();
+                        Utf8ToWide(strFixtureType.c_str(), strFixtureType.length(), fixture.strType);
+                        TrimWhitespace(fixture.strType);
+                        if (fixture.strType.empty())
+                        {
+                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "has an empty type.");
+                        }
+                        ParseEffects(jFixture["effect"], fixture.vecEffects);
+                        fixture.bCustom = IsCustomDmxFixtureType(fixture.strType.c_str());
+                        fixture.bAutomatic = IsAutomaticDmxFixtureType(fixture.strType.c_str());
+                        if (fixture.bCustom != FALSE)
+                        {
+                            if (!(jFixture.contains("startChannel") && jFixture["startChannel"].is_number_unsigned() &&
+                                  jFixture.contains("channels")))
+                            {
+                                ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
+                                                               "with type \"custom\" requires unsigned startChannel and channels.");
+                            }
+                            ullStartChannel = jFixture["startChannel"].get<UINT64>();
+                            if (ullStartChannel == 0 || ullStartChannel > 128)
+                            {
+                                ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
+                                                               "has a startChannel outside the DMX range of 1 through 128.");
+                            }
+                            ParseDmxFixtureChannels(jFixture["channels"], fixture.vecChannelMappings);
+                            if (ullStartChannel + fixture.vecChannelMappings.size() - 1 > 128)
+                            {
+                                ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex, "extends past DMX channel 128.");
+                            }
+                            fixture.nStartChannel = static_cast<USHORT>(ullStartChannel);
+                        }
+                        else if (jFixture.contains("startChannel") || jFixture.contains("channels"))
+                        {
+                            ThrowFixtureConfigurationError(nDeviceIndex, nFixtureIndex,
+                                                           "must not define startChannel or channels unless its type is \"custom\".");
+                        }
+                        lighting.vecDmxFixtures.push_back(std::move(fixture));
+                    }
+                }
+                else if (strType == "govee-strip")
+                {
+                    BOOL bSupportsRazer;
+
+                    if (!(jLighting.contains("supportsRazer") && jLighting["supportsRazer"].is_boolean() &&
+                          jLighting.contains("effect")))
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex,
+                                                      "with type \"govee-strip\" requires boolean supportsRazer and effect.");
+                    }
+                    bSupportsRazer = jLighting["supportsRazer"].get<bool>() ? TRUE : FALSE;
+                    if (bSupportsRazer != FALSE)
+                    {
+                        UINT64 ullStripLength;
+
+                        if (!(jLighting.contains("stripLength") && jLighting["stripLength"].is_number_unsigned()))
+                        {
+                            ThrowDeviceConfigurationError(nDeviceIndex,
+                                                          "with supportsRazer set to true requires unsigned stripLength.");
+                        }
+                        ullStripLength = jLighting["stripLength"].get<UINT64>();
+                        if (ullStripLength == 0 || ullStripLength > 255)
+                        {
+                            ThrowDeviceConfigurationError(nDeviceIndex, "has a Govee stripLength outside the range of 1 through 255.");
+                        }
+                        lighting.nStripLength = static_cast<USHORT>(ullStripLength);
+                    }
+                    else if (jLighting.contains("stripLength"))
+                    {
+                        ThrowDeviceConfigurationError(nDeviceIndex, "must not define stripLength unless supportsRazer is true.");
+                    }
+                    ParseEffects(jLighting["effect"], lighting.vecEffects);
+                    lighting.eType = CConfig::DeviceType::GoveeStrip;
+                    lighting.bSupportsRazer = bSupportsRazer;
+                    bGovee = TRUE;
+                }
+                else
+                {
+                    ThrowDeviceConfigurationError(nDeviceIndex,
+                                                  "has unsupported lighting type. Use rgb5050, dmx, ws281x, or govee-strip.");
+                }
+                device.vecLighting.push_back(std::move(lighting));
+            }
+
+            if ((bGovee != FALSE && device.vecLighting.size() != 1) || nDmxCount > 1)
+            {
+                ThrowDeviceConfigurationError(nDeviceIndex, "cannot mix Govee lighting or configure more than one DMX lighting output.");
+            }
+            if (bGovee != FALSE)
+            {
+                if (jDevice.contains("username") || jDevice.contains("privateKey"))
+                {
+                    ThrowDeviceConfigurationError(nDeviceIndex, "must not define username or privateKey for a Govee strip.");
+                }
+            }
+            else
             {
                 if (!(jDevice.contains("username") && jDevice["username"].is_string() &&
                       jDevice.contains("privateKey") && jDevice["privateKey"].is_string()))
@@ -250,30 +286,18 @@ HRESULT ReadAppConfig()
                 }
                 strUserName = jDevice["username"].get<std::string>();
                 strPrivateKey = jDevice["privateKey"].get<std::string>();
-
-                if (strUserName.empty() || strUserName.length() > 255)
+                if (strUserName.empty() || strUserName.length() > 255 ||
+                    std::any_of(strUserName.begin(), strUserName.end(), [](char ch) { return static_cast<unsigned char>(ch) > 127; }))
                 {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "has an empty or overly long username.");
+                    ThrowDeviceConfigurationError(nDeviceIndex, "has an invalid username.");
                 }
-                for (char ch : strUserName)
+                hRes = Base64::Decode(strPrivateKey.c_str(), strPrivateKey.length(), FALSE, decodedPrivateKey);
+                if (FAILED(hRes) || decodedPrivateKey.size() != CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES)
                 {
-                    if (static_cast<unsigned char>(ch) > 127)
-                    {
-                        ThrowDeviceConfigurationError(nDeviceIndex, "has a username containing non-ASCII characters.");
-                    }
+                    ThrowDeviceConfigurationError(nDeviceIndex, "has an invalid privateKey.");
                 }
                 device.strUserName = strUserName;
-
-                hRes = Base64::Decode(strPrivateKey.c_str(), strPrivateKey.length(), FALSE, decodedPrivateKey);
-                if (FAILED(hRes))
-                {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "has a privateKey that is not valid Base64 data.");
-                }
-                if (decodedPrivateKey.size() != CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES)
-                {
-                    ThrowDeviceConfigurationError(nDeviceIndex, "has a privateKey with an invalid decoded length.");
-                }
-                memcpy(device.aPrivateKey, decodedPrivateKey.data(), CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES);
+                memcpy(device.aPrivateKey, decodedPrivateKey.data(), sizeof(device.aPrivateKey));
                 SecureZeroMemory(decodedPrivateKey.data(), decodedPrivateKey.size());
                 decodedPrivateKey.clear();
             }

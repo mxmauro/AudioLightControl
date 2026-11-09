@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 // -----------------------------------------------------------------------------
+// HSV conversion helpers
 
 #define HSV_HUE_120_DEGREES 21845U
 #define HSV_HUE_240_DEGREES 43690U
@@ -15,6 +16,7 @@ static uint16_t max3u16(uint16_t a, uint16_t b, uint16_t c);
 static uint16_t min3u16(uint16_t a, uint16_t b, uint16_t c);
 
 // -----------------------------------------------------------------------------
+// HSV conversion implementation
 
 HSVColor_t rgbToHsv(uint16_t r, uint16_t g, uint16_t b)
 {

@@ -20,6 +20,9 @@ Use this skill for handwritten C/C++ source and headers. Also follow `repository
 ## Wrapping, alignment, and whitespace
 
 - Keep one blank line between function definitions. Use blank lines and existing separator comments for logical sections; do not introduce excessive empty space or reflow comments.
+- Separate include, constant, type, global-state, private-declaration, and implementation zones with the repository's `// -----------------------------------------------------------------------------` separator. Preserve and label existing zones where doing so improves navigation.
+- Use blank lines and concise intent comments for substantial nested phases; reserve separator lines for file-level zones. Do not create a separator or heading for ordinary adjacent public API groups.
+- Leave a blank line between a function's declarations and executable statements, immediately after a scoped lock or lease guard, and around meaningful nested lock, lifecycle, or ownership blocks.
 - Do not reorder includes. Keep local/project headers first, then internal project headers where present, then external, C, and ESP-IDF headers.
 - Wrap parameter lists, calls, declarations, and expressions only when needed. Pack items while they fit; align continuation text one character after the outer opening parenthesis. Keep binary operators with the preceding expression when wrapping.
 - Indent `case` labels inside `switch` blocks and keep each `break;` on its own line.
@@ -34,5 +37,5 @@ Use this skill for handwritten C/C++ source and headers. Also follow `repository
 ## Naming and expressions
 
 - Use PascalCase for ordinary C++ types, `*_t` for C-facing types, `*_s`/`*_e` for C struct/enum tags, and lower-camel case for C functions. Preserve established lower-case library types and existing public/module prefixes instead of renaming for consistency.
-- Add sparse comments for non-obvious intent or constraints, not narration of obvious statements.
+- Add a concise one-line comment before each non-obvious block to state its intent or constraint. Do not narrate straightforward assignments or validation checks.
 - Add parentheses to clarify mixed `&&`/`||` expressions and unary negation in larger expressions. Do not add redundant parentheses to homogeneous boolean chains.

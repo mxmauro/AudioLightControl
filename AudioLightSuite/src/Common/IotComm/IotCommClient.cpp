@@ -186,15 +186,6 @@ HRESULT CIotCommClient::Connect(_In_z_ LPCWSTR szHostNameW, _In_z_ LPCSTR szUser
         return hRes;
     }
 
-    {
-        CReaderWriterMutex::CAutoSharedLock cLock(m_cCbRwMutex);
-
-        if (!(m_cMessageReceivedCallback && m_cCloseCallback))
-        {
-            return E_NOT_SET;
-        }
-    }
-
     // Close previous session if any
     Cleanup();
     RundownProt_Initialize(&m_nRundownProt);
@@ -937,7 +928,7 @@ HRESULT CIotCommClient::SendCommand(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadL
     return S_OK;
 }
 
-HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload,
+HRESULT CIotCommClient::SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_bytes_opt_(nPayloadLen) LPCVOID lpPayload,
                                                 _In_ SIZE_T nPayloadLen, _Out_ std::vector<BYTE> &reply) noexcept
 {
     PendingReply_t sPendingReply = {};
@@ -1509,70 +1500,108 @@ CIotCommClient::CCommandResult CIotCommClient::SetHostNameCommand(_In_z_ LPCSTR 
     return BuildCommandResultFromStandardReply(vecReply);
 }
 
-CIotCommClient::CDeviceConfigCommandResult CIotCommClient::GetDeviceConfigCommand()
+CIotCommClient::CInputConfigCommandResult CIotCommClient::GetInputConfigCommand()
 {
-    static const BYTE uEmptyPayload = 0;
     std::vector<BYTE> vecReply;
     HRESULT hRes;
 
-    hRes = SendCommandAndWaitReply(CMD_GET_DEVICE_CONFIG, &uEmptyPayload, 0, vecReply);
+    hRes = SendCommandAndWaitReply(CMD_GET_INPUT_CONFIG, nullptr, 0, vecReply);
     if (FAILED(hRes))
     {
-        return CDeviceConfigCommandResult(hRes);
+        return CInputConfigCommandResult(hRes);
     }
 
-    return BuildDeviceConfigCommandResult(vecReply);
+    return BuildInputConfigCommandResult(vecReply);
 }
 
-CIotCommClient::CCommandResult CIotCommClient::SetDeviceConfigCommand(_In_ const DeviceConfig_t &sConfig)
+CIotCommClient::CCommandResult CIotCommClient::SetInputConfigCommand(_In_ const InputConfig_t &sConfig)
 {
     std::vector<BYTE> vecPayload;
     std::vector<BYTE> vecReply;
     HRESULT hRes;
 
-    hRes = BuildDeviceConfigPayload(sConfig, vecPayload);
+    hRes = BuildInputConfigPayload(sConfig, vecPayload);
     if (FAILED(hRes))
     {
         return CCommandResult(hRes);
     }
 
-    hRes = SendCommandAndWaitReply(CMD_SET_DEVICE_CONFIG, vecPayload.data(), vecPayload.size(), vecReply);
+    hRes = SendCommandAndWaitReply(CMD_SET_INPUT_CONFIG, vecPayload.data(), vecPayload.size(), vecReply);
+    return FAILED(hRes) ? CCommandResult(hRes) : BuildCommandResultFromStandardReply(vecReply);
+}
+
+CIotCommClient::CLightingConfigCommandResult CIotCommClient::GetLightingConfigCommand()
+{
+    std::vector<BYTE> vecReply;
+    HRESULT hRes;
+
+    hRes = SendCommandAndWaitReply(CMD_GET_LIGHTING_CONFIG, nullptr, 0, vecReply);
+    if (FAILED(hRes))
+    {
+        return CLightingConfigCommandResult(hRes);
+    }
+
+    return BuildLightingConfigCommandResult(vecReply);
+}
+
+CIotCommClient::CCommandResult CIotCommClient::SetLightingConfigCommand(_In_ const LightingConfig_t &sConfig)
+{
+    std::vector<BYTE> vecPayload;
+    std::vector<BYTE> vecReply;
+    HRESULT hRes;
+
+    hRes = BuildLightingConfigPayload(sConfig, vecPayload);
     if (FAILED(hRes))
     {
         return CCommandResult(hRes);
     }
 
-    return BuildCommandResultFromStandardReply(vecReply);
+    hRes = SendCommandAndWaitReply(CMD_SET_LIGHTING_CONFIG, vecPayload.data(), vecPayload.size(), vecReply);
+    return FAILED(hRes) ? CCommandResult(hRes) : BuildCommandResultFromStandardReply(vecReply);
 }
 
-HRESULT CIotCommClient::SetRawDmxChannelDataCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
-                                                    _In_ SIZE_T nDataLen)
+CIotCommClient::CCommandResult CIotCommClient::RebootCommand()
 {
-    std::vector<BYTE> vecPayload;
-    HRESULT hRes;
+    std::vector<BYTE> vecReply;
+    HRESULT hRes = SendCommandAndWaitReply(CMD_REBOOT, nullptr, 0, vecReply);
 
-    hRes = BuildRawDmxChannelDataPayload(nStartChannel, lpData, nDataLen, vecPayload);
-    if (FAILED(hRes))
-    {
-        return hRes;
-    }
-
-    return SendCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+    return FAILED(hRes) ? CCommandResult(hRes) : BuildCommandResultFromStandardReply(vecReply);
 }
 
-HRESULT CIotCommClient::SetRawDmxChannelDataUdpCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
-                                                       _In_ SIZE_T nDataLen)
+HRESULT CIotCommClient::SetRawDmxChannelDataCommand(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                                     _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen)
 {
     std::vector<BYTE> vecPayload;
-    HRESULT hRes;
+    HRESULT hRes = BuildRawDmxChannelDataPayload(byTarget, nStartChannel, lpData, nDataLen, vecPayload);
 
-    hRes = BuildRawDmxChannelDataPayload(nStartChannel, lpData, nDataLen, vecPayload);
-    if (FAILED(hRes))
-    {
-        return hRes;
-    }
+    return FAILED(hRes) ? hRes : SendCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+}
 
-    return SendUdpCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+HRESULT CIotCommClient::SetRawDmxChannelDataUdpCommand(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                                        _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen)
+{
+    std::vector<BYTE> vecPayload;
+    HRESULT hRes = BuildRawDmxChannelDataPayload(byTarget, nStartChannel, lpData, nDataLen, vecPayload);
+
+    return FAILED(hRes) ? hRes : SendUdpCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, vecPayload.data(), vecPayload.size());
+}
+
+HRESULT CIotCommClient::SetRawWs281xRgbDataCommand(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                                    _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen)
+{
+    std::vector<BYTE> vecPayload;
+    HRESULT hRes = BuildRawWs281xRgbDataPayload(byTarget, nFirstLed, nLedCount, lpRgbData, nRgbDataLen, vecPayload);
+
+    return FAILED(hRes) ? hRes : SendCommand(CMD_SET_RAW_WS281X_RGB_DATA, vecPayload.data(), vecPayload.size());
+}
+
+HRESULT CIotCommClient::SetRawWs281xRgbDataUdpCommand(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                                       _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen)
+{
+    std::vector<BYTE> vecPayload;
+    HRESULT hRes = BuildRawWs281xRgbDataPayload(byTarget, nFirstLed, nLedCount, lpRgbData, nRgbDataLen, vecPayload);
+
+    return FAILED(hRes) ? hRes : SendUdpCommand(CMD_SET_RAW_WS281X_RGB_DATA, vecPayload.data(), vecPayload.size());
 }
 
 CIotCommClient::CCommandResult CIotCommClient::BuildCommandResultFromStandardReply(_In_ std::vector<BYTE> &reply)
@@ -1609,329 +1638,347 @@ CIotCommClient::CCommandResult CIotCommClient::BuildCommandResultFromStandardRep
     return CCommandResult(S_OK, dwCode, strMessage.c_str());
 }
 
-CIotCommClient::CDeviceConfigCommandResult CIotCommClient::BuildDeviceConfigCommandResult(_In_ const std::vector<BYTE> &reply)
+CIotCommClient::CInputConfigCommandResult CIotCommClient::BuildInputConfigCommandResult(_In_ const std::vector<BYTE> &reply)
 {
-    static constexpr SIZE_T DEVICE_CONFIG_REPLY_HEADER_LEN = sizeof(BYTE) + sizeof(DWORD);
-    static constexpr SIZE_T DEVICE_CONFIG_HEADER_LEN = DEVICE_CONFIG_REPLY_HEADER_LEN + sizeof(BYTE) + sizeof(BYTE);
-    static constexpr SIZE_T RGB5050_PAYLOAD_LEN = sizeof(BYTE) * 4;
-    static constexpr USHORT DMX_MAX_CHANNELS = 128;
-    static constexpr SIZE_T DMX_MAX_FIXTURES = 16;
-    static constexpr SIZE_T DMX_FIXTURE_MAX_TYPE_LEN = 32;
-    static constexpr SIZE_T DMX_FIXTURE_MAX_CHANNELS_COUNT = 32;
-    static constexpr BYTE GPIO_MAX = 127;
-    CDeviceConfigCommandResult cResult(S_OK);
-    const BYTE *lpPayload;
-    SIZE_T nPayloadLen, nOffset;
-    SIZE_T nFixturesCount;
+    CInputConfigCommandResult cResult(S_OK);
 
-    if (reply.size() < DEVICE_CONFIG_HEADER_LEN)
+    if (reply.size() != 3 || reply[0] != 1 || ((reply[1] > 127) && reply[1] != 0xFF) ||
+        ((reply[2] > 127) && reply[2] != 0xFF))
     {
-        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+        return CInputConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
     }
 
-    cResult.m_nReplyVersion = reply[0];
-    cResult.m_dwCommandFlags = readUint32BE(reply.data() + 1);
-    cResult.m_nConfigVersion = reply[DEVICE_CONFIG_REPLY_HEADER_LEN];
-    cResult.m_nOutputControllerType = static_cast<OutputControllerType_t>(reply[DEVICE_CONFIG_REPLY_HEADER_LEN + 1]);
-    if (cResult.m_nReplyVersion != 1 || cResult.m_nConfigVersion != 1)
-    {
-        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-    }
-
-    lpPayload = reply.data() + DEVICE_CONFIG_HEADER_LEN;
-    nPayloadLen = reply.size() - DEVICE_CONFIG_HEADER_LEN;
-
-    switch (cResult.m_nOutputControllerType)
-    {
-        case OutputControllerTypeNone:
-            if (nPayloadLen != 0)
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-            cResult.m_bKnownControllerType = TRUE;
-            break;
-
-        case OutputControllerTypeRgb5050:
-            if (nPayloadLen != RGB5050_PAYLOAD_LEN)
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-
-            try
-            {
-                cResult.m_ptrRgb5050 = std::make_unique<CDeviceConfigCommandResult::DeviceConfigRgb5050_t>();
-            }
-            catch (const std::bad_alloc &)
-            {
-                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
-            }
-
-            cResult.m_ptrRgb5050->nRedGpioPin = lpPayload[0];
-            cResult.m_ptrRgb5050->nGreenGpioPin = lpPayload[1];
-            cResult.m_ptrRgb5050->nBlueGpioPin = lpPayload[2];
-            if (cResult.m_ptrRgb5050->nRedGpioPin > GPIO_MAX || cResult.m_ptrRgb5050->nGreenGpioPin > GPIO_MAX ||
-                cResult.m_ptrRgb5050->nBlueGpioPin > GPIO_MAX || lpPayload[3] > 1 ||
-                cResult.m_ptrRgb5050->nRedGpioPin == cResult.m_ptrRgb5050->nGreenGpioPin ||
-                cResult.m_ptrRgb5050->nRedGpioPin == cResult.m_ptrRgb5050->nBlueGpioPin ||
-                cResult.m_ptrRgb5050->nGreenGpioPin == cResult.m_ptrRgb5050->nBlueGpioPin)
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-            cResult.m_ptrRgb5050->bActiveLow = lpPayload[3] ? TRUE : FALSE;
-            cResult.m_bKnownControllerType = TRUE;
-            break;
-
-        case OutputControllerTypeDmx:
-            if (nPayloadLen < sizeof(USHORT) + (sizeof(BYTE) * 2))
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-
-            try
-            {
-                cResult.m_ptrDmx = std::make_unique<CDeviceConfigCommandResult::DeviceConfigDmx_t>();
-            }
-            catch (const std::bad_alloc &)
-            {
-                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
-            }
-
-            cResult.m_ptrDmx->nUniverseSize = readUint16BE(lpPayload);
-            cResult.m_ptrDmx->nTxGpioPin = lpPayload[2];
-            nFixturesCount = static_cast<SIZE_T>(lpPayload[3]);
-            nOffset = 4;
-
-            if (cResult.m_ptrDmx->nUniverseSize != DMX_MAX_CHANNELS || cResult.m_ptrDmx->nTxGpioPin > GPIO_MAX ||
-                nFixturesCount > DMX_MAX_FIXTURES)
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-
-            try
-            {
-                BYTE aUsedChannels[(DMX_MAX_CHANNELS + 7) / 8] = {};
-
-                cResult.m_ptrDmx->vecFixtures.reserve(nFixturesCount);
-
-                for (SIZE_T i = 0; i < nFixturesCount; i++)
-                {
-                    CDeviceConfigCommandResult::DeviceConfigDmxFixture_t sFixture;
-                    SIZE_T nTypeLen, nColoringCount;
-
-                    for (nTypeLen = 0; (nOffset + nTypeLen) < nPayloadLen && lpPayload[nOffset + nTypeLen] != 0; nTypeLen++);
-                    if ((nOffset + nTypeLen) >= nPayloadLen || nTypeLen == 0 || nTypeLen > DMX_FIXTURE_MAX_TYPE_LEN)
-                    {
-                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-                    }
-
-                    sFixture.strFixtureType.assign(reinterpret_cast<const char *>(lpPayload + nOffset), nTypeLen);
-                    if (!IsValidUtf8String(sFixture.strFixtureType))
-                    {
-                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-                    }
-                    nOffset += nTypeLen + 1;
-
-                    if ((nPayloadLen - nOffset) < (sizeof(USHORT) + sizeof(BYTE)))
-                    {
-                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-                    }
-
-                    sFixture.nStartChannel = readUint16BE(lpPayload + nOffset);
-                    nOffset += sizeof(USHORT);
-
-                    nColoringCount = lpPayload[nOffset];
-                    nOffset += sizeof(BYTE);
-
-                    if (nColoringCount == 0 || nColoringCount > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
-                        sFixture.nStartChannel > DMX_MAX_CHANNELS - nColoringCount + 1 ||
-                        (nPayloadLen - nOffset) < (nColoringCount * sizeof(USHORT)))
-                    {
-                        return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-                    }
-
-                    sFixture.vecColoringEntries.reserve(nColoringCount);
-                    for (SIZE_T j = 0; j < nColoringCount; j++)
-                    {
-                        USHORT nColoringEntry = readUint16BE(lpPayload + nOffset);
-                        USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + j - 1);
-
-                        if ((!IsValidDmxFixtureChannelMapping(nColoringEntry)) ||
-                            (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
-                        {
-                            return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-                        }
-
-                        aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
-                        sFixture.vecColoringEntries.push_back(nColoringEntry);
-                        nOffset += sizeof(USHORT);
-                    }
-
-                    cResult.m_ptrDmx->vecFixtures.push_back(std::move(sFixture));
-                }
-            }
-            catch (const std::bad_alloc &)
-            {
-                return CDeviceConfigCommandResult(E_OUTOFMEMORY);
-            }
-
-            if (nOffset != nPayloadLen)
-            {
-                return CDeviceConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
-            }
-            cResult.m_bKnownControllerType = TRUE;
-            break;
-    }
-
+    cResult.m_sConfig.nVersion = reply[0];
+    cResult.m_sConfig.nResetButtonGpioPin = reply[1];
+    cResult.m_sConfig.nIrReceiverGpioPin = reply[2];
     return cResult;
 }
 
-HRESULT CIotCommClient::BuildDeviceConfigPayload(_In_ const DeviceConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept
+CIotCommClient::CLightingConfigCommandResult CIotCommClient::BuildLightingConfigCommandResult(_In_ const std::vector<BYTE> &reply)
 {
-    static constexpr BYTE CONFIG_VERSION = 1;
-    static constexpr USHORT DMX_MAX_CHANNELS = 128;
+    static constexpr USHORT DMX_UNIVERSE_SIZE = 128;
     static constexpr SIZE_T DMX_MAX_FIXTURES = 16;
     static constexpr SIZE_T DMX_FIXTURE_MAX_TYPE_LEN = 32;
     static constexpr SIZE_T DMX_FIXTURE_MAX_CHANNELS_COUNT = 32;
-    static constexpr BYTE GPIO_MAX = 127;
-    HRESULT hRes;
+    CLightingConfigCommandResult cResult(S_OK);
+    SIZE_T nOffset = 2;
+    SIZE_T nOutputCount;
 
-    payload.clear();
+    if (reply.size() < 2 || reply[0] != 1 || reply[1] > 2)
+    {
+        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+    }
 
-    if (sConfig.nVersion != CONFIG_VERSION)
+    nOutputCount = reply[1];
+    try
+    {
+        cResult.m_sConfig.nVersion = reply[0];
+        cResult.m_sConfig.vecOutputs.reserve(nOutputCount);
+        for (SIZE_T i = 0; i < nOutputCount; i++)
+        {
+            LightingOutput_t sOutput;
+
+            if (nOffset >= reply.size())
+            {
+                return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+            sOutput.eType = static_cast<LightingType_t>(reply[nOffset++]);
+            switch (sOutput.eType)
+            {
+                case LightingTypeRgb5050:
+                    if (reply.size() - nOffset < 4)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    sOutput.nRedGpioPin = reply[nOffset++];
+                    sOutput.nGreenGpioPin = reply[nOffset++];
+                    sOutput.nBlueGpioPin = reply[nOffset++];
+                    if (reply[nOffset] > 1)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    sOutput.bActiveLow = reply[nOffset++] ? TRUE : FALSE;
+                    if (sOutput.nRedGpioPin > 127 || sOutput.nGreenGpioPin > 127 || sOutput.nBlueGpioPin > 127 ||
+                        sOutput.nRedGpioPin == sOutput.nGreenGpioPin || sOutput.nRedGpioPin == sOutput.nBlueGpioPin ||
+                        sOutput.nGreenGpioPin == sOutput.nBlueGpioPin)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    break;
+
+                case LightingTypeWs281x:
+                    if (reply.size() - nOffset < 4)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    sOutput.nDataGpioPin = reply[nOffset++];
+                    sOutput.nMirrorDataGpioPin = reply[nOffset++];
+                    sOutput.nLedCount = readUint16BE(reply.data() + nOffset);
+                    nOffset += sizeof(USHORT);
+                    if (sOutput.nDataGpioPin > 127 || ((sOutput.nMirrorDataGpioPin > 127) && sOutput.nMirrorDataGpioPin != 0xFF) ||
+                        sOutput.nMirrorDataGpioPin == sOutput.nDataGpioPin || sOutput.nLedCount == 0 || sOutput.nLedCount > 300)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    break;
+
+                case LightingTypeDmx:
+                    if (reply.size() - nOffset < 4)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    sOutput.nUniverseSize = readUint16BE(reply.data() + nOffset);
+                    nOffset += sizeof(USHORT);
+                    sOutput.nTxGpioPin = reply[nOffset++];
+                    if (sOutput.nUniverseSize != DMX_UNIVERSE_SIZE || sOutput.nTxGpioPin > 127 || reply[nOffset] > DMX_MAX_FIXTURES)
+                    {
+                        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                    }
+                    {
+                        BYTE aUsedChannels[(DMX_UNIVERSE_SIZE + 7) / 8] = {};
+                        SIZE_T nFixtureCount = reply[nOffset++];
+
+                        sOutput.vecFixtures.reserve(nFixtureCount);
+                        for (SIZE_T j = 0; j < nFixtureCount; j++)
+                        {
+                            LightingDmxFixture_t sFixture;
+                            SIZE_T nTypeLen, nChannelCount;
+
+                            for (nTypeLen = 0; (nOffset + nTypeLen) < reply.size() && reply[nOffset + nTypeLen] != 0; nTypeLen++)
+                            {
+                            }
+                            if ((nOffset + nTypeLen) >= reply.size() || nTypeLen == 0 || nTypeLen > DMX_FIXTURE_MAX_TYPE_LEN)
+                            {
+                                return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                            }
+                            sFixture.strFixtureType.assign(reinterpret_cast<const char *>(reply.data() + nOffset), nTypeLen);
+                            if (!IsValidUtf8String(sFixture.strFixtureType))
+                            {
+                                return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                            }
+                            nOffset += nTypeLen + 1;
+                            if (reply.size() - nOffset < 3)
+                            {
+                                return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                            }
+                            sFixture.nStartChannel = readUint16BE(reply.data() + nOffset);
+                            nOffset += sizeof(USHORT);
+                            nChannelCount = reply[nOffset++];
+                            if (nChannelCount == 0 || nChannelCount > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
+                                sFixture.nStartChannel > DMX_UNIVERSE_SIZE - nChannelCount + 1 ||
+                                reply.size() - nOffset < nChannelCount * sizeof(USHORT))
+                            {
+                                return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                            }
+                            sFixture.vecColoringEntries.reserve(nChannelCount);
+                            for (SIZE_T k = 0; k < nChannelCount; k++)
+                            {
+                                USHORT nMapping = readUint16BE(reply.data() + nOffset);
+                                USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + k - 1);
+
+                                if ((!IsValidDmxFixtureChannelMapping(nMapping)) ||
+                                    (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
+                                {
+                                    return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+                                }
+                                aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
+                                sFixture.vecColoringEntries.push_back(nMapping);
+                                nOffset += sizeof(USHORT);
+                            }
+                            sOutput.vecFixtures.push_back(std::move(sFixture));
+                        }
+                    }
+                    break;
+
+                default:
+                    return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+            }
+            cResult.m_sConfig.vecOutputs.push_back(std::move(sOutput));
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        return CLightingConfigCommandResult(E_OUTOFMEMORY);
+    }
+
+    if (nOffset != reply.size())
+    {
+        return CLightingConfigCommandResult(E_INVALID_PROTOCOL_FORMAT);
+    }
+    return std::move(cResult);
+}
+
+HRESULT CIotCommClient::BuildInputConfigPayload(_In_ const InputConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept
+{
+    if (sConfig.nVersion != 1 || ((sConfig.nResetButtonGpioPin > 127) && sConfig.nResetButtonGpioPin != 0xFF) ||
+        ((sConfig.nIrReceiverGpioPin > 127) && sConfig.nIrReceiverGpioPin != 0xFF))
     {
         return E_INVALIDARG;
     }
 
-    switch (sConfig.nOutputControllerType)
+    try
     {
-        case OutputControllerTypeNone:
-            break;
+        payload = { sConfig.nVersion, sConfig.nResetButtonGpioPin, sConfig.nIrReceiverGpioPin };
+    }
+    catch (const std::bad_alloc &)
+    {
+        return E_OUTOFMEMORY;
+    }
+    return S_OK;
+}
 
-        case OutputControllerTypeDmx:
-            if (sConfig.sDmx.nUniverseSize != DMX_MAX_CHANNELS || sConfig.sDmx.nTxGpioPin > GPIO_MAX ||
-                sConfig.sDmx.vecFixtures.size() > DMX_MAX_FIXTURES)
-            {
-                return E_INVALIDARG;
-            }
-            {
-                BYTE aUsedChannels[(DMX_MAX_CHANNELS + 7) / 8] = {};
+HRESULT CIotCommClient::BuildLightingConfigPayload(_In_ const LightingConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept
+{
+    static constexpr USHORT DMX_UNIVERSE_SIZE = 128;
+    static constexpr SIZE_T DMX_MAX_FIXTURES = 16;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_TYPE_LEN = 32;
+    static constexpr SIZE_T DMX_FIXTURE_MAX_CHANNELS_COUNT = 32;
 
-                for (const CDeviceConfigCommandResult::DeviceConfigDmxFixture_t &sFixture : sConfig.sDmx.vecFixtures)
-                {
-                    if (sFixture.strFixtureType.empty() || sFixture.strFixtureType.size() > DMX_FIXTURE_MAX_TYPE_LEN ||
-                        sFixture.strFixtureType.find('\0') != std::string::npos || sFixture.vecColoringEntries.empty() ||
-                        sFixture.vecColoringEntries.size() > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
-                        sFixture.nStartChannel > DMX_MAX_CHANNELS - sFixture.vecColoringEntries.size() + 1 ||
-                        !IsValidUtf8String(sFixture.strFixtureType))
+    if (sConfig.nVersion != 1 || sConfig.vecOutputs.size() > 2)
+    {
+        return E_INVALIDARG;
+    }
+
+    try
+    {
+        payload.clear();
+        payload.push_back(sConfig.nVersion);
+        payload.push_back(static_cast<BYTE>(sConfig.vecOutputs.size()));
+        for (const LightingOutput_t &sOutput : sConfig.vecOutputs)
+        {
+            payload.push_back(static_cast<BYTE>(sOutput.eType));
+            switch (sOutput.eType)
+            {
+                case LightingTypeRgb5050:
+                    if (sOutput.nRedGpioPin > 127 || sOutput.nGreenGpioPin > 127 || sOutput.nBlueGpioPin > 127 ||
+                        sOutput.nRedGpioPin == sOutput.nGreenGpioPin || sOutput.nRedGpioPin == sOutput.nBlueGpioPin ||
+                        sOutput.nGreenGpioPin == sOutput.nBlueGpioPin)
                     {
                         return E_INVALIDARG;
                     }
+                    payload.push_back(sOutput.nRedGpioPin);
+                    payload.push_back(sOutput.nGreenGpioPin);
+                    payload.push_back(sOutput.nBlueGpioPin);
+                    payload.push_back(sOutput.bActiveLow ? 1 : 0);
+                    break;
 
-                    for (SIZE_T i = 0; i < sFixture.vecColoringEntries.size(); i++)
+                case LightingTypeWs281x:
+                    if (sOutput.nDataGpioPin > 127 || ((sOutput.nMirrorDataGpioPin > 127) && sOutput.nMirrorDataGpioPin != 0xFF) ||
+                        sOutput.nMirrorDataGpioPin == sOutput.nDataGpioPin || sOutput.nLedCount == 0 || sOutput.nLedCount > 300)
                     {
-                        USHORT nColoringEntry = sFixture.vecColoringEntries[i];
-                        USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + i - 1);
+                        return E_INVALIDARG;
+                    }
+                    payload.push_back(sOutput.nDataGpioPin);
+                    payload.push_back(sOutput.nMirrorDataGpioPin);
+                    payload.resize(payload.size() + sizeof(USHORT));
+                    writeUint16BE(payload.data() + payload.size() - sizeof(USHORT), sOutput.nLedCount);
+                    break;
 
-                        if ((!IsValidDmxFixtureChannelMapping(nColoringEntry)) ||
-                            (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
+                case LightingTypeDmx:
+                    if (sOutput.nUniverseSize != DMX_UNIVERSE_SIZE || sOutput.nTxGpioPin > 127 ||
+                        sOutput.vecFixtures.size() > DMX_MAX_FIXTURES)
+                    {
+                        return E_INVALIDARG;
+                    }
+                    payload.resize(payload.size() + sizeof(USHORT));
+                    writeUint16BE(payload.data() + payload.size() - sizeof(USHORT), sOutput.nUniverseSize);
+                    payload.push_back(sOutput.nTxGpioPin);
+                    payload.push_back(static_cast<BYTE>(sOutput.vecFixtures.size()));
+                    {
+                        BYTE aUsedChannels[(DMX_UNIVERSE_SIZE + 7) / 8] = {};
+
+                        for (const LightingDmxFixture_t &sFixture : sOutput.vecFixtures)
                         {
-                            return E_INVALIDARG;
+                            if (sFixture.strFixtureType.empty() || sFixture.strFixtureType.size() > DMX_FIXTURE_MAX_TYPE_LEN ||
+                                sFixture.strFixtureType.find('\0') != std::string::npos || sFixture.vecColoringEntries.empty() ||
+                                sFixture.vecColoringEntries.size() > DMX_FIXTURE_MAX_CHANNELS_COUNT || sFixture.nStartChannel == 0 ||
+                                sFixture.nStartChannel > DMX_UNIVERSE_SIZE - sFixture.vecColoringEntries.size() + 1 ||
+                                !IsValidUtf8String(sFixture.strFixtureType))
+                            {
+                                return E_INVALIDARG;
+                            }
+                            payload.insert(payload.end(), sFixture.strFixtureType.begin(), sFixture.strFixtureType.end());
+                            payload.push_back(0);
+                            payload.resize(payload.size() + sizeof(USHORT));
+                            writeUint16BE(payload.data() + payload.size() - sizeof(USHORT), sFixture.nStartChannel);
+                            payload.push_back(static_cast<BYTE>(sFixture.vecColoringEntries.size()));
+                            for (SIZE_T i = 0; i < sFixture.vecColoringEntries.size(); i++)
+                            {
+                                USHORT nMapping = sFixture.vecColoringEntries[i];
+                                USHORT nChannel = static_cast<USHORT>(sFixture.nStartChannel + i);
+
+                                if ((!IsValidDmxFixtureChannelMapping(nMapping)) ||
+                                    (aUsedChannels[nChannel >> 3] & (1U << (nChannel & 7))) != 0)
+                                {
+                                    return E_INVALIDARG;
+                                }
+                                aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
+                                payload.resize(payload.size() + sizeof(USHORT));
+                                writeUint16BE(payload.data() + payload.size() - sizeof(USHORT), nMapping);
+                            }
                         }
-
-                        aUsedChannels[nChannel >> 3] |= 1U << (nChannel & 7);
                     }
-                }
+                    break;
+
+                default:
+                    return E_INVALIDARG;
             }
-            break;
-
-        case OutputControllerTypeRgb5050:
-            if (sConfig.sRgb5050.nRedGpioPin > GPIO_MAX || sConfig.sRgb5050.nGreenGpioPin > GPIO_MAX ||
-                sConfig.sRgb5050.nBlueGpioPin > GPIO_MAX || sConfig.sRgb5050.nRedGpioPin == sConfig.sRgb5050.nGreenGpioPin ||
-                sConfig.sRgb5050.nRedGpioPin == sConfig.sRgb5050.nBlueGpioPin ||
-                sConfig.sRgb5050.nGreenGpioPin == sConfig.sRgb5050.nBlueGpioPin)
-            {
-                return E_INVALIDARG;
-            }
-            break;
-
-        default:
-            return E_INVALIDARG;
-    }
-
-    hRes = TranslateToHresult([&]()
-    {
-        payload.push_back(sConfig.nVersion);
-        payload.push_back(static_cast<BYTE>(sConfig.nOutputControllerType));
-
-        switch (sConfig.nOutputControllerType)
-        {
-            case OutputControllerTypeDmx:
-                payload.resize(payload.size() + sizeof(USHORT) + (sizeof(BYTE) * 2));
-                writeUint16BE(payload.data() + 2, sConfig.sDmx.nUniverseSize);
-                payload[4] = sConfig.sDmx.nTxGpioPin;
-                payload[5] = static_cast<BYTE>(sConfig.sDmx.vecFixtures.size());
-
-                for (const CDeviceConfigCommandResult::DeviceConfigDmxFixture_t &sFixture : sConfig.sDmx.vecFixtures)
-                {
-                    payload.insert(payload.end(), sFixture.strFixtureType.begin(), sFixture.strFixtureType.end());
-                    payload.push_back(0);
-                    payload.resize(payload.size() + sizeof(USHORT) + sizeof(BYTE));
-                    writeUint16BE(payload.data() + payload.size() - sizeof(USHORT) - sizeof(BYTE), sFixture.nStartChannel);
-                    payload.back() = static_cast<BYTE>(sFixture.vecColoringEntries.size());
-                    for (USHORT nColoringEntry : sFixture.vecColoringEntries)
-                    {
-                        SIZE_T nOffset = payload.size();
-
-                        payload.resize(nOffset + sizeof(USHORT));
-                        writeUint16BE(payload.data() + nOffset, nColoringEntry);
-                    }
-                }
-                break;
-
-            case OutputControllerTypeRgb5050:
-                payload.resize(payload.size() + (sizeof(BYTE) * 4));
-                payload[2] = sConfig.sRgb5050.nRedGpioPin;
-                payload[3] = sConfig.sRgb5050.nGreenGpioPin;
-                payload[4] = sConfig.sRgb5050.nBlueGpioPin;
-                payload[5] = sConfig.sRgb5050.bActiveLow ? 1 : 0;
-                break;
         }
-    });
-    if (FAILED(hRes))
+    }
+    catch (const std::bad_alloc &)
     {
-        return hRes;
+        return E_OUTOFMEMORY;
     }
 
     return (payload.size() <= MAX_MSG_SIZE) ? S_OK : HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
 }
 
-HRESULT CIotCommClient::BuildRawDmxChannelDataPayload(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
-                                                      _In_ SIZE_T nDataLen, _Out_ std::vector<BYTE> &payload) noexcept
+HRESULT CIotCommClient::BuildRawDmxChannelDataPayload(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                                       _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen,
+                                                       _Out_ std::vector<BYTE> &payload) noexcept
 {
-    static constexpr USHORT DMX_UNIVERSE_SIZE = 128;
-    HRESULT hRes;
-
-    payload.clear();
-
-    if ((!lpData) || nDataLen == 0 || nStartChannel == 0 || nStartChannel > DMX_UNIVERSE_SIZE ||
-        nDataLen > DMX_UNIVERSE_SIZE || (static_cast<SIZE_T>(nStartChannel) + nDataLen - 1) > DMX_UNIVERSE_SIZE)
+    if ((byTarget > 1 && byTarget != 0xFF) || (!lpData) || nDataLen == 0 || nDataLen > USHRT_MAX || nStartChannel == 0)
     {
         return E_INVALIDARG;
     }
 
-    hRes = TranslateToHresult([&]()
+    try
     {
-        payload.resize((sizeof(USHORT) * 2) + nDataLen);
-    });
-    if (FAILED(hRes))
+        payload.resize(1 + (sizeof(USHORT) * 2) + nDataLen);
+    }
+    catch (const std::bad_alloc &)
     {
-        return hRes;
+        return E_OUTOFMEMORY;
+    }
+    payload[0] = byTarget;
+    writeUint16BE(payload.data() + 1, nStartChannel);
+    writeUint16BE(payload.data() + 1 + sizeof(USHORT), static_cast<USHORT>(nDataLen));
+    memcpy(payload.data() + 1 + (sizeof(USHORT) * 2), lpData, nDataLen);
+    return S_OK;
+}
+
+HRESULT CIotCommClient::BuildRawWs281xRgbDataPayload(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                                      _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen,
+                                                      _Out_ std::vector<BYTE> &payload) noexcept
+{
+    if ((byTarget > 1 && byTarget != 0xFF) || (!lpRgbData) || nFirstLed == 0 || nLedCount == 0 || nLedCount > 300 ||
+        nRgbDataLen != static_cast<SIZE_T>(nLedCount) * 3)
+    {
+        return E_INVALIDARG;
     }
 
-    writeUint16BE(payload.data(), nStartChannel);
-    writeUint16BE(payload.data() + sizeof(USHORT), static_cast<USHORT>(nDataLen));
-    memcpy(payload.data() + (sizeof(USHORT) * 2), lpData, nDataLen);
-
+    try
+    {
+        payload.resize(1 + (sizeof(USHORT) * 2) + nRgbDataLen);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return E_OUTOFMEMORY;
+    }
+    payload[0] = byTarget;
+    writeUint16BE(payload.data() + 1, nFirstLed);
+    writeUint16BE(payload.data() + 1 + sizeof(USHORT), nLedCount);
+    memcpy(payload.data() + 1 + (sizeof(USHORT) * 2), lpRgbData, nRgbDataLen);
     return S_OK;
 }
 
@@ -2128,13 +2175,13 @@ ULONGLONG CIotCommClient::GetNextTxCounter() const
     return m_ullNextTxCounter;
 }
 
-HRESULT CIotCommClient::EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_(nDataLen) _In_ LPCVOID lpData, _In_ SIZE_T nDataLen)
+HRESULT CIotCommClient::EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_opt_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen)
 {
     LPBYTE lpHeader;
     BYTE aIV[SESSION_IV_LEN];
     HRESULT hRes;
 
-    _ASSERT(lpData);
+    _ASSERT(nDataLen == 0 || lpData);
     // Check data size
     if (nDataLen > MAX_MSG_SIZE)
     {
@@ -2197,14 +2244,14 @@ HRESULT CIotCommClient::EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_(nDataL
     return S_OK;
 }
 
-HRESULT CIotCommClient::EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_(nDataLen) _In_ LPCVOID lpData, _In_ SIZE_T nDataLen)
+HRESULT CIotCommClient::EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_opt_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen)
 {
     LPBYTE lpHeader;
     BYTE aIV[SESSION_IV_LEN];
     int nSentLen;
     HRESULT hRes;
 
-    _ASSERT(lpData);
+    _ASSERT(nDataLen == 0 || lpData);
     if (nDataLen > MAX_MSG_SIZE)
     {
         return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);

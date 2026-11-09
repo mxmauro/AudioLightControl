@@ -14,6 +14,7 @@ public:
     typedef enum class DeviceType_e {
         Rgb5050 = 0,
         Dmx,
+        Ws281x,
         GoveeStrip,
     } DeviceType;
 
@@ -50,16 +51,20 @@ public:
         std::vector<DeviceEffect> vecEffects;
     } DmxFixture;
 
-    typedef struct Device_s {
-        std::wstring strName;
+    typedef struct Lighting_s {
         DeviceType eType{ DeviceType::Rgb5050 };
-        std::wstring strHost;
-        std::string strUserName;
-        BYTE aPrivateKey[CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES]{};
         std::vector<DeviceEffect> vecEffects;
         std::vector<DmxFixture> vecDmxFixtures;
         BOOL bSupportsRazer{ FALSE };
         USHORT nStripLength{ 0 };
+    } Lighting;
+
+    typedef struct Device_s {
+        std::wstring strName;
+        std::wstring strHost;
+        std::string strUserName;
+        BYTE aPrivateKey[CECDsaKeyPair::RAW_PRIVATE_KEY_BYTES]{};
+        std::vector<Lighting> vecLighting;
     } Device;
 
 public:

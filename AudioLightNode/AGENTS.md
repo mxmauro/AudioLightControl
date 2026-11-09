@@ -23,6 +23,7 @@
 - `idf-build.ps1 rebuild` runs `set-target` for its `-Target` value (default: `c3`, normalized to `esp32c3`) and `update-dependencies`.
 - `-Target` is accepted only for `rebuild`; a regular `build` reuses the target recorded in the selected profile's `sdkconfig`.
 - Keep the target as `esp32c3` unless the task explicitly changes hardware support.
+- Do not flash firmware unless the user explicitly requests it in the current conversation.
 
 ## Application behavior
 - Provisioning, Wi-Fi lifecycle, mDNS, reset flow, and IoT command dispatch all live in `main/main.cpp`.
@@ -38,6 +39,12 @@
 
 ## Naming and API conventions
 - Preserve the established C API naming: PascalCase types such as `DmxFixtureConfig_t`, `Config_t`, and `RGBColor_t`; `_s`/`_e` tags; lower-camel module functions such as `dmxControllerInit`; and existing utility helpers such as `lerp_u16` and `br_ext_read_gpio`.
+
+## Source layout and comments
+- Separate include, constant, type, global-state, private-declaration, and implementation zones with the repository's `// -----------------------------------------------------------------------------` separator.
+- Use blank lines and concise intent comments for substantial nested phases; reserve separator lines for file-level zones. Do not create a separator or heading for ordinary adjacent public API groups.
+- Leave a blank line between a function's declarations and its executable statements, immediately after a scoped lock or lease guard, and around meaningful nested lock or lifecycle blocks.
+- Add a concise one-line comment before non-obvious blocks to state their intent. Do not narrate straightforward assignments or validation checks.
 
 ## GuiTerminal integration
 - When working on the Windows GuiTerminal consumer in the sibling AudioLightSuite project, start with `C:\Fuentes\IoT\AudioLightControl\AudioLightSuite\vcpkg_installed\x64-windows-static\share\guiterminal\docs\ai-index.md`, then read only the relevant linked topic. The installed headers are authoritative.

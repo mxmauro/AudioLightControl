@@ -19,6 +19,7 @@
 #include <hal/uart_periph.h>
 #include <portmacro.h>
 #include <storage/nvs.h>
+#include <stdlib.h>
 #include <string.h>
 #include <task.h>
 
@@ -49,6 +50,7 @@ static const char* TAG = "DMX-Controller";
 #define CHECK_HAS_16BIT_TILT_FLAG(fixture) ((fixture)->reserved[0] & 0x08) != 0
 
 // -----------------------------------------------------------------------------
+// DMX command and runtime types
 
 typedef enum OutputMode_e {
     OutputModeFixtureRgb = 0,
@@ -96,8 +98,10 @@ typedef struct Controller_s {
 } Controller_t;
 
 // -----------------------------------------------------------------------------
+// Global controller state
 
-static Controller_t sController = {};
+static Controller_t* sDmxController = nullptr;
+#define sController (*sDmxController)
 static uint8_t sUniverse[DMX_TX_FRAME_SIZE];
 static portMUX_TYPE sDmxSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -152,6 +156,7 @@ esp_err_t dmxControllerReadConfig(binary_reader_t* br, DmxControllerConfig_t* co
     assert(config);
     assert(pinValidator);
 
+    // Reset partial state so every parse failure leaves an inert configuration.
     memset(config, 0, sizeof(DmxControllerConfig_t));
     if ((!br_read_be16(br, &universeSize)) || universeSize != DMX_MAX_CHANNELS || (!br_ext_read_gpio(br, &config->txGpioPin)) ||
         (!br_read_byte(br, &fixturesCount)) || fixturesCount > DMX_MAX_FIXTURES)
@@ -267,10 +272,23 @@ esp_err_t dmxControllerInit(const DmxControllerConfig_t* config)
     esp_err_t err;
 
     assert(config);
+    if (sDmxController)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    sDmxController = static_cast<Controller_t*>(malloc(sizeof(Controller_t)));
+    if (!sDmxController)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(sDmxController, 0, sizeof(Controller_t));
+    sController.txGpioPin = GPIO_NUM_NC;
 
+    // Claim the UART output before configuring the transmitter.
     err = gpioPinManagerClaim(config->txGpioPin, GpioPinUseOutput, "DMX TX");
     if (err != ESP_OK)
     {
+        dmxControllerDeinit();
         return err;
     }
     sController.txGpioPin = config->txGpioPin;
@@ -314,6 +332,7 @@ esp_err_t dmxControllerInit(const DmxControllerConfig_t* config)
         }
     }
 
+    // Publish fixture state before the ISR and worker can start.
     clearUniverse();
     uart_ll_inverse_signal(sController.uartHw, 0);
     uart_ll_txfifo_rst(sController.uartHw);
@@ -321,6 +340,7 @@ esp_err_t dmxControllerInit(const DmxControllerConfig_t* config)
     uart_ll_clr_intsts_mask(sController.uartHw, UART_INTR_TXFIFO_EMPTY | UART_INTR_TX_DONE);
     uart_ll_set_txfifo_empty_thr(sController.uartHw, DMX_UART_TXFIFO_EMPTY_THR);
 
+    // Create the command queue before starting the worker task.
     sController.queue = xQueueCreate(DMX_QUEUE_LENGTH, sizeof(Command_t));
     if (!sController.queue)
     {
@@ -386,6 +406,12 @@ esp_err_t dmxControllerInit(const DmxControllerConfig_t* config)
 
 void dmxControllerDeinit()
 {
+    if (!sDmxController)
+    {
+        return;
+    }
+
+    // Stop the worker before dismantling queue, timer, UART, and GPIO state.
     if (sController.task)
     {
         taskJoin(sController.task);
@@ -433,17 +459,20 @@ void dmxControllerDeinit()
     sController.txErrorPending = false;
     gpioPinManagerRelease(sController.txGpioPin);
     sController.txGpioPin = GPIO_NUM_NC;
+    free(sDmxController);
+    sDmxController = nullptr;
 }
 
 esp_err_t dmxControllerSet(uint16_t r, uint16_t g, uint16_t b)
 {
     Command_t cmd;
 
-    if (!sController.task)
+    if (!sDmxController || !sController.task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The command queue serializes concurrent producers.
     cmd.type = CMD_SET;
     cmd.color.r = r;
     cmd.color.g = g;
@@ -455,11 +484,12 @@ esp_err_t dmxControllerFadeTo(uint16_t r, uint16_t g, uint16_t b, uint32_t ms)
 {
     Command_t cmd;
 
-    if (!sController.task)
+    if (!sDmxController || !sController.task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The command queue serializes concurrent producers.
     cmd.type = CMD_FADE_TO;
     cmd.target.r = r;
     cmd.target.g = g;
@@ -472,11 +502,12 @@ esp_err_t dmxControllerSetAndFadeTo(uint16_t rStart, uint16_t gStart, uint16_t b
 {
     Command_t cmd;
 
-    if (!sController.task)
+    if (!sDmxController || !sController.task)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The command queue serializes concurrent producers.
     cmd.type = CMD_SET_AND_FADE_TO;
     cmd.color.r = rStart;
     cmd.color.g = gStart;
@@ -492,19 +523,22 @@ esp_err_t dmxControllerSetChannels(uint16_t startChannel, const uint8_t* data, s
 {
     Command_t cmd;
 
-    if (!sController.task)
+    if (!sDmxController || !sController.task)
     {
         return ESP_ERR_INVALID_STATE;
     }
-    if (!data || dataLen == 0 || dataLen > DMX_MAX_CHANNELS)
+    if (!data || startChannel == 0)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    if (startChannel == 0 || startChannel > DMX_MAX_CHANNELS - dataLen + 1)
+    if (dataLen == 0 || startChannel > DMX_MAX_CHANNELS)
     {
-        return ESP_ERR_INVALID_ARG;
+        return ESP_OK;
     }
 
+    dataLen = (dataLen > DMX_MAX_CHANNELS - startChannel + 1U) ? DMX_MAX_CHANNELS - startChannel + 1U : dataLen;
+
+    // Limit the queued command to the addressable DMX universe.
     cmd.type = CMD_SET_CHANNELS;
     cmd.startChannel = startChannel;
     cmd.dataLen = dataLen;
@@ -513,6 +547,7 @@ esp_err_t dmxControllerSetChannels(uint16_t startChannel, const uint8_t* data, s
 }
 
 // -----------------------------------------------------------------------------
+// Worker and ISR implementation
 
 static void dmxTask(Task_t task, void* arg)
 {
@@ -533,6 +568,7 @@ static void dmxTask(Task_t task, void* arg)
     applyColor(current.r, current.g, current.b);
     lastWakeTick = xTaskGetTickCount();
 
+    // The worker exclusively owns fade state and applies queued commands.
     while (!taskShouldQuit(task))
     {
         Command_t cmd;

@@ -4,6 +4,7 @@
 #include <string.h>
 
 // -----------------------------------------------------------------------------
+// GPIO ownership types
 
 typedef struct GpioPin_s {
     const char* owner;
@@ -15,6 +16,7 @@ typedef struct GpioPinValidatorImpl_s {
 } GpioPinValidatorImpl_t;
 
 // -----------------------------------------------------------------------------
+// Global GPIO ownership state
 
 static RWMutex rwMtx;
 static GpioPin_t pins[GPIO_NUM_MAX] = {};
@@ -49,7 +51,7 @@ esp_err_t gpioPinManagerClaim(gpio_num_t pin, GpioPinUse_t use, const char* owne
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Check and add to managed pins
+    // Serialize ownership changes so a GPIO cannot be claimed twice.
     {
         AutoRWMutex lock(rwMtx, false);
 
@@ -68,6 +70,7 @@ esp_err_t gpioPinManagerClaim(gpio_num_t pin, GpioPinUse_t use, const char* owne
 
 void gpioPinManagerRelease(gpio_num_t pin)
 {
+    // Serialize removal with concurrent claims and readers.
     AutoRWMutex lock(rwMtx, false);
 
     if (pin >= 0 && pin < GPIO_NUM_MAX)
@@ -78,6 +81,7 @@ void gpioPinManagerRelease(gpio_num_t pin)
 
 const char* gpioPinManagerGetOwnerAndUse(gpio_num_t pin, GpioPinUse_t* use)
 {
+    // Read the ownership snapshot without blocking other readers.
     AutoRWMutex lock(rwMtx, true);
 
     if (pin < 0 || pin >= GPIO_NUM_MAX)

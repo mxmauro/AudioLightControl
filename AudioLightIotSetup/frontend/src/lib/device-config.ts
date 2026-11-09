@@ -1,12 +1,16 @@
-import type { Client } from '@mxmauro/iot-comm.js';
+import type {
+	InputConfig,
+	LightingConfig,
+	DmxFixture as ProtocolDmxFixture,
+	Rgb5050LightingConfig,
+	Ws281xLightingConfig
+} from '@mxmauro/iot-comm.js';
 
-const CONFIG_VERSION = 1;
-const REPLY_VERSION = 1;
 const DMX_UNIVERSE_SIZE = 128;
 const DMX_MAX_FIXTURES = 16;
 const DMX_MAX_FIXTURE_TYPE_BYTES = 32;
 const DMX_MAX_FIXTURE_CHANNELS = 32;
-const MAX_COMMAND_PAYLOAD_BYTES = 2000;
+const WS281X_MAX_LEDS = 300;
 
 const DMX_SPECIAL_CHANNEL_ENTRIES = [
 	['Dimmer', 0x0100],
@@ -34,23 +38,17 @@ export type DmxSpecialChannel = (typeof DMX_SPECIAL_CHANNEL_ENTRIES)[number][0];
 
 export type DmxColoring = number | DmxSpecialChannel;
 
-export type DmxFixture = {
-	type: string;
-	startChannel: number;
+export type DmxFixture = Omit<ProtocolDmxFixture, 'coloring'> & {
 	coloring: DmxColoring[];
 };
 
 export type DeviceConfiguration =
-	| { output: 'none' }
 	| { output: 'rgb5050'; redGpio: number; greenGpio: number; blueGpio: number; activeLow: boolean }
-	| { output: 'dmx'; txGpio: number; fixtures: DmxFixture[] };
+	| { output: 'dmx'; txGpio: number; fixtures: DmxFixture[] }
+	| { output: 'ws281x'; dataGpio: number; mirrorGpio?: number; ledCount: number };
 
-export type DeviceConfigurationReply = {
-	commandFlags: number;
-	configuration: DeviceConfiguration;
-};
+type GpioAssignment = [field: string, gpio: number | undefined, optional: boolean];
 
-// Carries the form field associated with a protocol-level configuration validation failure.
 class DeviceConfigurationValidationError extends Error {
 	public readonly field: string;
 
@@ -60,66 +58,10 @@ class DeviceConfigurationValidationError extends Error {
 	}
 }
 
-// Incrementally decodes a bounded, big-endian device-configuration reply.
-class Reader {
-	private readonly bytes: Uint8Array;
-	private offset = 0;
-
-	public constructor(data: ArrayBuffer) {
-		this.bytes = new Uint8Array(data);
-	}
-
-	public byte(): number {
-		this.require(1);
-		return this.bytes[this.offset++];
-	}
-
-	public uint16(): number {
-		this.require(2);
-		const value = (this.bytes[this.offset] << 8) | this.bytes[this.offset + 1];
-		this.offset += 2;
-		return value;
-	}
-
-	public uint32(): number {
-		this.require(4);
-		const value = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 4).getUint32(0, false);
-		this.offset += 4;
-		return value;
-	}
-
-	public string(): string {
-		const start = this.offset;
-		while (this.offset < this.bytes.length && this.bytes[this.offset] !== 0) {
-			this.offset++;
-		}
-		if (this.offset === this.bytes.length) {
-			throw new Error('Configuration contains an unterminated string.');
-		}
-		const value = new TextDecoder('utf-8', { fatal: true }).decode(this.bytes.slice(start, this.offset));
-		this.offset++;
-		return value;
-	}
-
-	public assertFinished(): void {
-		if (this.offset !== this.bytes.length) {
-			throw new Error('Configuration reply contains trailing data.');
-		}
-	}
-
-	private require(length: number): void {
-		if (this.offset + length > this.bytes.length) {
-			throw new Error('Configuration reply is truncated.');
-		}
-	}
-}
-
 // -----------------------------------------------------------------------------
 
 export const GPIO_MIN = 0;
 export const GPIO_MAX = 127;
-export const CMD_GET_DEVICE_CONFIG = 0x7001;
-export const CMD_SET_DEVICE_CONFIG = 0x7002;
 export const DMX_SPECIAL_CHANNELS: readonly DmxSpecialChannel[] = DMX_SPECIAL_CHANNEL_ENTRIES.map(([channel]) => channel);
 
 // -----------------------------------------------------------------------------
@@ -128,108 +70,205 @@ export const isDmxSpecialChannel = (value: unknown): value is DmxSpecialChannel 
 	return typeof value === 'string' && DMX_SPECIAL_CHANNELS.includes(value as DmxSpecialChannel);
 };
 
-export const getDeviceConfigurationValidationErrors = (configuration: DeviceConfiguration): Record<string, string> => {
-	// Preserve independent RGB field errors so each pin input can show its own correction.
-	if (configuration.output === 'rgb5050') {
-		const errors: Record<string, string> = {};
-		const redIsValid = isValidGpio(configuration.redGpio);
-		const greenIsValid = isValidGpio(configuration.greenGpio);
-		const blueIsValid = isValidGpio(configuration.blueGpio);
+export const toEditableLightingConfiguration = (configuration: LightingConfig): DeviceConfiguration[] => {
+	return configuration.map((output) => {
+		if (output.type === 'rgb5050') {
+			return { ...output, output: 'rgb5050' };
+		}
+		if (output.type === 'ws281x') {
+			return { ...output, output: 'ws281x' };
+		}
+		return {
+			output: 'dmx',
+			txGpio: output.txGpio,
+			fixtures: output.fixtures.map((fixture) => ({
+				...fixture,
+				coloring: fixture.coloring.map(decodeColoring)
+			}))
+		};
+	});
+};
 
-		if (!redIsValid) {
-			errors.redGpio = `GPIO pin must be between ${GPIO_MIN} and ${GPIO_MAX}.`;
+export const toLightingConfiguration = (configuration: DeviceConfiguration[]): LightingConfig => {
+	validateLightingConfiguration(configuration);
+	return configuration.map((output) => {
+		if (output.output === 'rgb5050') {
+			return {
+				type: 'rgb5050',
+				redGpio: output.redGpio,
+				greenGpio: output.greenGpio,
+				blueGpio: output.blueGpio,
+				activeLow: output.activeLow
+			} satisfies Rgb5050LightingConfig;
 		}
-		if (!greenIsValid) {
-			errors.greenGpio = `GPIO pin must be between ${GPIO_MIN} and ${GPIO_MAX}.`;
-		} else if (redIsValid && configuration.greenGpio === configuration.redGpio) {
-			errors.greenGpio = 'Pin is already used by Red GPIO.';
+		if (output.output === 'ws281x') {
+			return {
+				type: 'ws281x',
+				dataGpio: output.dataGpio,
+				mirrorGpio: output.mirrorGpio,
+				ledCount: output.ledCount
+			} satisfies Ws281xLightingConfig;
 		}
-		if (!blueIsValid) {
-			errors.blueGpio = `GPIO pin must be between ${GPIO_MIN} and ${GPIO_MAX}.`;
-		} else if (redIsValid && configuration.blueGpio === configuration.redGpio) {
-			errors.blueGpio = 'Pin is already used by Red GPIO.';
-		} else if (greenIsValid && configuration.blueGpio === configuration.greenGpio) {
-			errors.blueGpio = 'Pin is already used by Green GPIO.';
-		}
+		return {
+			type: 'dmx',
+			txGpio: output.txGpio,
+			fixtures: output.fixtures.map((fixture) => ({ ...fixture, coloring: fixture.coloring.map((coloring) => encodeColoring(coloring)) }))
+		};
+	});
+};
 
-		return errors;
+export const getInputConfigurationValidationErrors = (configuration: InputConfig, lighting: LightingConfig): Record<string, string> => {
+	const errors: Record<string, string> = {};
+	const usedGpios = getLightingGpioOwners(lighting);
+	const reportedConflicts = new Set<number>();
+	for (const [field, label, gpio] of [
+		['resetGpio', 'Reset button GPIO', configuration.resetGpio],
+		['irGpio', 'IR receiver GPIO', configuration.irGpio]
+	] as const) {
+		if (!isOptionalGpio(gpio)) {
+			addError(errors, field, `${label} must be between ${GPIO_MIN} and ${GPIO_MAX}, or not connected.`);
+			continue;
+		}
+		if (gpio !== undefined) {
+			const owner = usedGpios.get(gpio);
+			if (owner) {
+				if (!reportedConflicts.has(gpio)) {
+					addError(errors, field, `GPIO ${gpio} is already assigned to ${owner}.`);
+					reportedConflicts.add(gpio);
+				}
+			} else {
+				usedGpios.set(gpio, label);
+			}
+		}
+	}
+	return errors;
+};
+
+export const getLightingConfigurationValidationErrors = (
+	configuration: DeviceConfiguration[],
+	input: InputConfig
+): Record<string, string> => {
+	const errors: Record<string, string> = {};
+	const usedGpios = new Map<number, string>();
+	const reportedConflicts = new Set<number>();
+	if (configuration.length > 2) {
+		addError(errors, 'configuration', 'A device supports at most two lighting controllers.');
+	}
+	if (configuration.filter((output) => output.output === 'dmx').length > 1) {
+		addError(errors, 'configuration', 'A device supports at most one DMX controller.');
 	}
 
-	// Convert shared configuration validation failures into the form field that needs attention.
-	try {
-		validateDeviceConfiguration(configuration);
-		return {};
-	} catch (error) {
-		if (error instanceof DeviceConfigurationValidationError) {
-			return { [error.field]: error.message };
+	for (const [label, gpio] of [
+		['the reset-button input', input.resetGpio],
+		['the IR-receiver input', input.irGpio]
+	] as const) {
+		if (isValidGpio(gpio) && !usedGpios.has(gpio)) {
+			usedGpios.set(gpio, label);
 		}
-		return { configuration: error instanceof Error ? error.message : 'Configuration is invalid.' };
+	}
+
+	for (const [outputIndex, output] of configuration.entries()) {
+		for (const [field, gpio, optional] of outputGpios(output)) {
+			const errorField = `outputs.${outputIndex}.${field}`;
+			if (optional && gpio === undefined) {
+				continue;
+			}
+			if (!isValidGpio(gpio)) {
+				addError(errors, errorField, `GPIO pin must be between ${GPIO_MIN} and ${GPIO_MAX}${optional ? ', or be omitted' : ''}.`);
+				continue;
+			}
+			const owner = usedGpios.get(gpio);
+			if (owner) {
+				if (!reportedConflicts.has(gpio)) {
+					addError(errors, errorField, `GPIO ${gpio} is already assigned to ${owner}.`);
+					reportedConflicts.add(gpio);
+				}
+			} else {
+				usedGpios.set(gpio, `controller ${outputIndex + 1}`);
+			}
+		}
+		if (output.output === 'dmx') {
+			collectDmxValidationErrors(output, outputIndex, errors);
+		} else if (output.output === 'ws281x' && !isValidWs281xLedCount(output.ledCount)) {
+			addError(errors, `outputs.${outputIndex}.ledCount`, `WS281x LED count must be between 1 and ${WS281X_MAX_LEDS}.`);
+		}
+	}
+
+	return errors;
+};
+
+// -----------------------------------------------------------------------------
+
+const validateLightingConfiguration = (configuration: DeviceConfiguration[]): void => {
+	if (configuration.length > 2) {
+		throw new DeviceConfigurationValidationError('configuration', 'A device supports at most two lighting outputs.');
+	}
+	if (configuration.filter((output) => output.output === 'dmx').length > 1) {
+		throw new DeviceConfigurationValidationError('configuration', 'A device supports at most one DMX output.');
+	}
+	const usedGpios = new Map<number, string>();
+	for (const [outputIndex, output] of configuration.entries()) {
+		validateOutput(output, outputIndex, usedGpios);
 	}
 };
 
-export const validateDeviceConfiguration = (configuration: DeviceConfiguration): void => {
-	// Disabled output has no hardware fields to validate.
-	if (configuration.output === 'none') {
+const validateOutput = (output: DeviceConfiguration, outputIndex: number, usedGpios: Map<number, string>): void => {
+	for (const [field, gpio, optional] of outputGpios(output)) {
+		if (optional && gpio === undefined) {
+			continue;
+		}
+		const validatedGpio = requireGpio(gpio, `outputs.${outputIndex}.${field}`);
+		const owner = usedGpios.get(validatedGpio);
+		if (owner) {
+			throw new DeviceConfigurationValidationError(`outputs.${outputIndex}.${field}`, `GPIO ${validatedGpio} is already used by ${owner}.`);
+		}
+		usedGpios.set(validatedGpio, `output ${outputIndex + 1}`);
+	}
+	if (output.output === 'ws281x') {
+		if (!Number.isInteger(output.ledCount) || output.ledCount < 1 || output.ledCount > WS281X_MAX_LEDS) {
+			throw new DeviceConfigurationValidationError(
+				`outputs.${outputIndex}.ledCount`,
+				`WS281x LED count must be between 1 and ${WS281X_MAX_LEDS}.`
+			);
+		}
 		return;
 	}
-
-	// Validate dedicated RGB pins and their uniqueness before accepting an RGB configuration.
-	if (configuration.output === 'rgb5050') {
-		requireGpio(configuration.redGpio, 'redGpio');
-		requireGpio(configuration.greenGpio, 'greenGpio');
-		if (configuration.greenGpio === configuration.redGpio) {
-			throw new DeviceConfigurationValidationError('greenGpio', 'Pin is already used by Red GPIO.');
-		}
-		requireGpio(configuration.blueGpio, 'blueGpio');
-		if (configuration.blueGpio === configuration.redGpio) {
-			throw new DeviceConfigurationValidationError('blueGpio', 'Pin is already used by Red GPIO.');
-		}
-		if (configuration.blueGpio === configuration.greenGpio) {
-			throw new DeviceConfigurationValidationError('blueGpio', 'Pin is already used by Green GPIO.');
-		}
+	if (output.output !== 'dmx') {
 		return;
 	}
-
-	// Validate DMX transport, fixture bounds, and non-overlapping channel assignments.
-	requireGpio(configuration.txGpio, 'txGpio');
-	if (configuration.fixtures.length > DMX_MAX_FIXTURES) {
-		throw new DeviceConfigurationValidationError('fixtures', `DMX supports at most ${DMX_MAX_FIXTURES} fixtures.`);
+	if (output.fixtures.length > DMX_MAX_FIXTURES) {
+		throw new DeviceConfigurationValidationError(`outputs.${outputIndex}.fixtures`, `DMX supports at most ${DMX_MAX_FIXTURES} fixtures.`);
 	}
 	const usedChannels = new Set<number>();
 	const encoder = new TextEncoder();
-	for (const [index, fixture] of configuration.fixtures.entries()) {
-		const name = `Fixture ${index + 1}`;
+	for (const [fixtureIndex, fixture] of output.fixtures.entries()) {
+		const prefix = `outputs.${outputIndex}.fixtures.${fixtureIndex}`;
+		const name = `Fixture ${fixtureIndex + 1}`;
 		const typeLength = encoder.encode(fixture.type).byteLength;
 		if (typeLength < 1 || typeLength > DMX_MAX_FIXTURE_TYPE_BYTES || fixture.type.includes('\0')) {
 			throw new DeviceConfigurationValidationError(
-				`fixtures.${index}.type`,
-				`${name} needs a type name between 1 and ${DMX_MAX_FIXTURE_TYPE_BYTES} characters.`
+				`${prefix}.type`,
+				`${name} needs a type name between 1 and ${DMX_MAX_FIXTURE_TYPE_BYTES} bytes.`
 			);
 		}
 		if (!Number.isInteger(fixture.startChannel) || fixture.startChannel < 1 || fixture.startChannel > DMX_UNIVERSE_SIZE) {
 			throw new DeviceConfigurationValidationError(
-				`fixtures.${index}.startChannel`,
+				`${prefix}.startChannel`,
 				`${name} start channel must be between 1 and ${DMX_UNIVERSE_SIZE}.`
 			);
 		}
 		if (fixture.coloring.length < 1 || fixture.coloring.length > DMX_MAX_FIXTURE_CHANNELS) {
-			throw new DeviceConfigurationValidationError(
-				`fixtures.${index}.coloring`,
-				`${name} must have 1 to ${DMX_MAX_FIXTURE_CHANNELS} channels.`
-			);
+			throw new DeviceConfigurationValidationError(`${prefix}.coloring`, `${name} must have 1 to ${DMX_MAX_FIXTURE_CHANNELS} channels.`);
 		}
 		if (fixture.startChannel + fixture.coloring.length - 1 > DMX_UNIVERSE_SIZE) {
-			throw new DeviceConfigurationValidationError(
-				`fixtures.${index}.startChannel`,
-				`${name} extends beyond DMX channel ${DMX_UNIVERSE_SIZE}.`
-			);
+			throw new DeviceConfigurationValidationError(`${prefix}.startChannel`, `${name} extends beyond DMX channel ${DMX_UNIVERSE_SIZE}.`);
 		}
 		for (const [channel, coloring] of fixture.coloring.entries()) {
-			encodeColoring(coloring, `fixtures.${index}.coloring.${channel}`);
+			encodeColoring(coloring, `${prefix}.coloring.${channel}`);
 			const channelNumber = fixture.startChannel + channel;
 			if (usedChannels.has(channelNumber)) {
 				throw new DeviceConfigurationValidationError(
-					`fixtures.${index}.coloring.${channel}`,
+					`${prefix}.coloring.${channel}`,
 					`DMX channel ${channelNumber} is used by more than one fixture.`
 				);
 			}
@@ -238,116 +277,123 @@ export const validateDeviceConfiguration = (configuration: DeviceConfiguration):
 	}
 };
 
-export const decodeDeviceConfigurationReply = (data: ArrayBuffer): DeviceConfigurationReply => {
-	// Decode the reply envelope before dispatching to the output-specific configuration payload.
-	const reader = new Reader(data);
-	if (reader.byte() !== REPLY_VERSION) {
-		throw new Error('Unsupported device configuration reply version.');
+const collectDmxValidationErrors = (
+	output: Extract<DeviceConfiguration, { output: 'dmx' }>,
+	outputIndex: number,
+	errors: Record<string, string>
+): void => {
+	const prefix = `outputs.${outputIndex}`;
+	if (output.fixtures.length > DMX_MAX_FIXTURES) {
+		addError(errors, `${prefix}.fixtures`, `DMX supports at most ${DMX_MAX_FIXTURES} fixtures.`);
 	}
-	const commandFlags = reader.uint32();
-	const version = reader.byte();
-	if (version !== CONFIG_VERSION) {
-		throw new Error('Unsupported device configuration version.');
-	}
-	const outputType = reader.byte();
-	let configuration: DeviceConfiguration;
-	// Decode and validate the selected output payload without accepting unsupported variants.
-	if (outputType === 0) {
-		configuration = { output: 'none' };
-	} else if (outputType === 2) {
-		const redGpio = reader.byte();
-		const greenGpio = reader.byte();
-		const blueGpio = reader.byte();
-		const activeLow = reader.byte();
-		if (activeLow > 1) {
-			throw new Error('Configuration contains an invalid RGB5050 polarity.');
+	const channelAssignments = new Map<number, string[]>();
+	const encoder = new TextEncoder();
+	for (const [fixtureIndex, fixture] of output.fixtures.entries()) {
+		const fixturePrefix = `${prefix}.fixtures.${fixtureIndex}`;
+		const name = `Fixture ${fixtureIndex + 1}`;
+		const typeLength = encoder.encode(fixture.type).byteLength;
+		if (typeLength < 1 || typeLength > DMX_MAX_FIXTURE_TYPE_BYTES || fixture.type.includes('\0')) {
+			addError(errors, `${fixturePrefix}.type`, `${name} needs a type name between 1 and ${DMX_MAX_FIXTURE_TYPE_BYTES} bytes.`);
 		}
-		configuration = {
-			output: 'rgb5050',
-			redGpio,
-			greenGpio,
-			blueGpio,
-			activeLow: activeLow === 1
-		};
-		validateDeviceConfiguration(configuration);
-	} else if (outputType === 1) {
-		if (reader.uint16() !== DMX_UNIVERSE_SIZE) {
-			throw new Error('Unsupported DMX universe size.');
+		const hasValidStart = Number.isInteger(fixture.startChannel) && fixture.startChannel >= 1 && fixture.startChannel <= DMX_UNIVERSE_SIZE;
+		if (!hasValidStart) {
+			addError(errors, `${fixturePrefix}.startChannel`, `${name} start channel must be between 1 and ${DMX_UNIVERSE_SIZE}.`);
 		}
-		const txGpio = reader.byte();
-		const fixtureCount = reader.byte();
-		if (fixtureCount > DMX_MAX_FIXTURES) {
-			throw new Error('Configuration has too many DMX fixtures.');
+		if (fixture.coloring.length < 1 || fixture.coloring.length > DMX_MAX_FIXTURE_CHANNELS) {
+			addError(errors, `${fixturePrefix}.coloring`, `${name} must have 1 to ${DMX_MAX_FIXTURE_CHANNELS} channels.`);
 		}
-		const fixtures: DmxFixture[] = [];
-		for (let i = 0; i < fixtureCount; i++) {
-			const type = reader.string();
-			const startChannel = reader.uint16();
-			const channelCount = reader.byte();
-			const coloring = Array.from({ length: channelCount }, () => decodeColoring(reader.uint16()));
-			fixtures.push({ type, startChannel, coloring });
+		if (hasValidStart && fixture.startChannel + fixture.coloring.length - 1 > DMX_UNIVERSE_SIZE) {
+			addError(errors, `${fixturePrefix}.startChannel`, `${name} extends beyond DMX channel ${DMX_UNIVERSE_SIZE}.`);
 		}
-		configuration = { output: 'dmx', txGpio, fixtures };
-		validateDeviceConfiguration(configuration);
-	} else {
-		throw new Error('Configuration contains an unsupported output type.');
-	}
-	// Reject trailing reply bytes before returning a fully validated configuration.
-	reader.assertFinished();
-	return { commandFlags, configuration };
-};
-
-export const encodeDeviceConfiguration = (configuration: DeviceConfiguration): ArrayBuffer => {
-	// Validate first, then build the versioned command payload in the firmware's byte order.
-	validateDeviceConfiguration(configuration);
-	const bytes: number[] = [CONFIG_VERSION, configuration.output === 'none' ? 0 : configuration.output === 'dmx' ? 1 : 2];
-	const write16 = (value: number): void => {
-		bytes.push((value >>> 8) & 0xff, value & 0xff);
-	};
-	// Append only the fields required by the selected output controller.
-	if (configuration.output === 'rgb5050') {
-		bytes.push(configuration.redGpio, configuration.greenGpio, configuration.blueGpio);
-		bytes.push(configuration.activeLow ? 1 : 0);
-	}
-	if (configuration.output === 'dmx') {
-		write16(DMX_UNIVERSE_SIZE);
-		bytes.push(configuration.txGpio);
-		bytes.push(configuration.fixtures.length);
-		for (const fixture of configuration.fixtures) {
-			bytes.push(...new TextEncoder().encode(fixture.type), 0);
-			write16(fixture.startChannel);
-			bytes.push(fixture.coloring.length);
-			for (const coloring of fixture.coloring) {
-				write16(encodeColoring(coloring));
+		for (const [channelIndex, coloring] of fixture.coloring.entries()) {
+			const channelField = `${fixturePrefix}.coloring.${channelIndex}`;
+			if (!isValidDmxColoring(coloring)) {
+				addError(errors, channelField, 'DMX channels must be fixed values from 0 to 255 or supported dynamic channels.');
+			}
+			if (hasValidStart && fixture.startChannel + channelIndex <= DMX_UNIVERSE_SIZE) {
+				const channelNumber = fixture.startChannel + channelIndex;
+				const assignments = channelAssignments.get(channelNumber) ?? [];
+				assignments.push(channelField);
+				channelAssignments.set(channelNumber, assignments);
 			}
 		}
 	}
-	// Keep the resulting command within the transport's maximum payload size.
-	if (bytes.length > MAX_COMMAND_PAYLOAD_BYTES) {
-		throw new Error('Configuration is too large to send.');
+	for (const [channelNumber, assignments] of channelAssignments.entries()) {
+		if (assignments.length > 1) {
+			for (const field of assignments) {
+				addError(errors, field, `DMX channel ${channelNumber} is used by more than one fixture.`);
+			}
+		}
 	}
-	return Uint8Array.from(bytes).buffer;
 };
 
-export const getDeviceConfiguration = async (client: Client): Promise<DeviceConfigurationReply> => {
-	return decodeDeviceConfigurationReply(await client.sendCommandAndWaitReply(CMD_GET_DEVICE_CONFIG, new ArrayBuffer(0)));
+const outputGpios = (output: DeviceConfiguration): GpioAssignment[] => {
+	if (output.output === 'rgb5050') {
+		return [
+			['redGpio', output.redGpio, false],
+			['greenGpio', output.greenGpio, false],
+			['blueGpio', output.blueGpio, false]
+		];
+	}
+	if (output.output === 'ws281x') {
+		return [
+			['dataGpio', output.dataGpio, false],
+			['mirrorGpio', output.mirrorGpio, true]
+		];
+	}
+	return [['txGpio', output.txGpio, false]];
 };
 
-export const setDeviceConfiguration = async (client: Client, configuration: DeviceConfiguration): Promise<void> => {
-	const reply = await client.sendCommandAndWaitReply(CMD_SET_DEVICE_CONFIG, encodeDeviceConfiguration(configuration));
-	assertCommandSuccess(reply);
+const getLightingGpioOwners = (configuration: LightingConfig): Map<number, string> => {
+	const owners = new Map<number, string>();
+	for (const [controllerIndex, controller] of configuration.entries()) {
+		const gpios =
+			controller.type === 'rgb5050'
+				? [controller.redGpio, controller.greenGpio, controller.blueGpio]
+				: controller.type === 'ws281x'
+					? [controller.dataGpio, controller.mirrorGpio]
+					: [controller.txGpio];
+		for (const gpio of gpios) {
+			if (!isValidGpio(gpio) || owners.has(gpio)) {
+				continue;
+			}
+			owners.set(gpio, `controller ${controllerIndex + 1}`);
+		}
+	}
+	return owners;
 };
 
-// -----------------------------------------------------------------------------
-
-const isValidGpio = (value: number): boolean => {
-	return Number.isInteger(value) && value >= GPIO_MIN && value <= GPIO_MAX;
+const isOptionalGpio = (value: unknown): boolean => {
+	return value === undefined || isValidGpio(value);
 };
 
-const requireGpio = (value: number, field: string): void => {
+const isValidGpio = (value: unknown): value is number => {
+	return typeof value === 'number' && Number.isInteger(value) && value >= GPIO_MIN && value <= GPIO_MAX;
+};
+
+const isValidWs281xLedCount = (value: unknown): value is number => {
+	return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= WS281X_MAX_LEDS;
+};
+
+const isValidDmxColoring = (value: DmxColoring): boolean => {
+	return (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xff) || isDmxSpecialChannel(value);
+};
+
+const addError = (errors: Record<string, string>, field: string, message: string): void => {
+	if (!errors[field]) {
+		errors[field] = message;
+		return;
+	}
+	if (!errors[field].includes(message)) {
+		errors[field] = `${errors[field]} ${message}`;
+	}
+};
+
+const requireGpio = (value: unknown, field: string): number => {
 	if (!isValidGpio(value)) {
 		throw new DeviceConfigurationValidationError(field, `GPIO pin must be between ${GPIO_MIN} and ${GPIO_MAX}.`);
 	}
+	return value;
 };
 
 const decodeColoring = (value: number): DmxColoring => {
@@ -370,22 +416,4 @@ const encodeColoring = (value: DmxColoring, field = 'configuration'): number => 
 		return channel[1];
 	}
 	throw new DeviceConfigurationValidationError(field, 'DMX channels must be fixed values from 0 to 255 or supported dynamic channels.');
-};
-
-const assertCommandSuccess = (reply: ArrayBuffer): void => {
-	// Decode the firmware status envelope and preserve its human-readable failure message.
-	if (reply.byteLength < 4) {
-		throw new Error('Device command returned an incomplete response.');
-	}
-	const view = new DataView(reply);
-	const code = view.getUint32(0, false);
-	if (code === 0) {
-		return;
-	}
-	let end = 4;
-	while (end < reply.byteLength && view.getUint8(end) !== 0) {
-		end++;
-	}
-	const message = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(reply, 4, end - 4));
-	throw new Error(message || `Device command failed with code ${code}.`);
 };

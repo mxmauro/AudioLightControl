@@ -26,6 +26,7 @@ class CIotCommClient
 {
 public:
     static constexpr USHORT CMD_SET_RAW_DMX_CHANNEL_DATA = 4;
+    static constexpr USHORT CMD_SET_RAW_WS281X_RGB_DATA = 5;
     static constexpr HRESULT IOTCOMM_E_UNEXPECTED_SERVER_RESPONSE = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_HTTP, 0x1001);
     static constexpr HRESULT IOTCOMM_E_AUTH_FAILED = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_HTTP, 0x1002);
 
@@ -35,18 +36,21 @@ public:
     static constexpr USHORT CMD_CHANGE_USER_CREDENTIALS = 0x7FF4;
     static constexpr USHORT CMD_UDP_OPEN = 0x7FF8;
     static constexpr USHORT CMD_SET_MDNS_HOSTNAME = 0x7000;
-    static constexpr USHORT CMD_GET_DEVICE_CONFIG = 0x7001;
-    static constexpr USHORT CMD_SET_DEVICE_CONFIG = 0x7002;
+    static constexpr USHORT CMD_GET_INPUT_CONFIG = 0x7001;
+    static constexpr USHORT CMD_SET_INPUT_CONFIG = 0x7002;
+    static constexpr USHORT CMD_GET_LIGHTING_CONFIG = 0x7003;
+    static constexpr USHORT CMD_SET_LIGHTING_CONFIG = 0x7004;
+    static constexpr USHORT CMD_REBOOT = 0x7005;
 
     static constexpr BYTE USER_CREATE_FLAG_MUST_CHANGE_CREDENTIALS_ON_NEXT_LOGIN = 0x01;
     static constexpr BYTE USER_CREATE_FLAGS_MASK = USER_CREATE_FLAG_MUST_CHANGE_CREDENTIALS_ON_NEXT_LOGIN;
 
 public:
-    typedef enum OutputControllerType_e : BYTE {
-        OutputControllerTypeNone = 0,
-        OutputControllerTypeDmx = 1,
-        OutputControllerTypeRgb5050 = 2
-    } OutputControllerType_t;
+    typedef enum LightingType_e : BYTE {
+        LightingTypeDmx = 1,
+        LightingTypeRgb5050 = 2,
+        LightingTypeWs281x = 3
+    } LightingType_t;
 
     typedef enum DmxFixtureChannelMapping_e : USHORT {
         DmxFixtureChannelMappingDimmer = 0x0100,
@@ -167,103 +171,86 @@ public:
         CCommandResult &operator=(_Inout_ CCommandResult &&) noexcept = default;
     };
 
-    class CDeviceConfigCommandResult : public CBaseCommandResult
+    typedef struct InputConfig_s {
+        BYTE nVersion{ 1 };
+        BYTE nResetButtonGpioPin{ 0xFF };
+        BYTE nIrReceiverGpioPin{ 0xFF };
+    } InputConfig_t;
+
+    typedef struct LightingDmxFixture_s {
+        std::string strFixtureType;
+        USHORT nStartChannel{ 0 };
+        std::vector<USHORT> vecColoringEntries;
+    } LightingDmxFixture_t;
+
+    typedef struct LightingOutput_s {
+        LightingType_t eType{ LightingTypeRgb5050 };
+        BYTE nRedGpioPin{ 0 };
+        BYTE nGreenGpioPin{ 0 };
+        BYTE nBlueGpioPin{ 0 };
+        BOOL bActiveLow{ FALSE };
+        USHORT nUniverseSize{ 0 };
+        BYTE nTxGpioPin{ 0 };
+        std::vector<LightingDmxFixture_t> vecFixtures;
+        BYTE nDataGpioPin{ 0 };
+        BYTE nMirrorDataGpioPin{ 0xFF };
+        USHORT nLedCount{ 0 };
+    } LightingOutput_t;
+
+    typedef struct LightingConfig_s {
+        BYTE nVersion{ 1 };
+        std::vector<LightingOutput_t> vecOutputs;
+    } LightingConfig_t;
+
+    class CInputConfigCommandResult : public CBaseCommandResult
     {
     public:
-        typedef struct DeviceConfigRgb5050_s {
-            BYTE nRedGpioPin{ 0 };
-            BYTE nGreenGpioPin{ 0 };
-            BYTE nBlueGpioPin{ 0 };
-            BOOL bActiveLow{ FALSE };
-        } DeviceConfigRgb5050_t;
-
-        typedef struct DeviceConfigDmxFixture_s {
-            std::string strFixtureType;
-            USHORT nStartChannel{ 0 };
-            std::vector<USHORT> vecColoringEntries;
-        } DeviceConfigDmxFixture_t;
-
-        typedef struct DeviceConfigDmx_s {
-            USHORT nUniverseSize{ 0 };
-            BYTE nTxGpioPin{ 0 };
-            std::vector<DeviceConfigDmxFixture_t> vecFixtures;
-        } DeviceConfigDmx_t;
-
-    public:
-        CDeviceConfigCommandResult() = default;
-        explicit CDeviceConfigCommandResult(_In_ HRESULT _hrInternalError) noexcept : CBaseCommandResult(_hrInternalError)
+        CInputConfigCommandResult() = default;
+        explicit CInputConfigCommandResult(_In_ HRESULT _hrInternalError) noexcept : CBaseCommandResult(_hrInternalError)
         {
         }
-        CDeviceConfigCommandResult(_In_ const CDeviceConfigCommandResult &) = delete;
-        CDeviceConfigCommandResult(_Inout_ CDeviceConfigCommandResult &&) noexcept = default;
-        ~CDeviceConfigCommandResult() = default;
+        CInputConfigCommandResult(_In_ const CInputConfigCommandResult &) = delete;
+        CInputConfigCommandResult(_Inout_ CInputConfigCommandResult &&) noexcept = default;
+        ~CInputConfigCommandResult() = default;
 
-        CDeviceConfigCommandResult &operator=(_In_ const CDeviceConfigCommandResult &) = delete;
-        CDeviceConfigCommandResult &operator=(_Inout_ CDeviceConfigCommandResult &&) noexcept = default;
+        CInputConfigCommandResult &operator=(_In_ const CInputConfigCommandResult &) = delete;
+        CInputConfigCommandResult &operator=(_Inout_ CInputConfigCommandResult &&) noexcept = default;
 
-        BYTE ReplyVersion() const noexcept
+        const InputConfig_t &Config() const noexcept
         {
-            return m_nReplyVersion;
-        };
-
-        BYTE ConfigVersion() const noexcept
-        {
-            return m_nConfigVersion;
-        };
-
-        OutputControllerType_t OutputControllerType() const noexcept
-        {
-            return m_nOutputControllerType;
-        };
-
-        DWORD CommandFlags() const noexcept
-        {
-            return m_dwCommandFlags;
-        };
-
-        BOOL HasKnownControllerType() const noexcept
-        {
-            return m_bKnownControllerType;
-        };
-
-        BOOL IsRgb5050ControllerType() const noexcept
-        {
-            return m_ptrRgb5050 ? TRUE : FALSE;
-        };
-
-        BOOL IsDmxControllerType() const noexcept
-        {
-            return m_ptrDmx ? TRUE : FALSE;
-        };
-
-        _Ret_maybenull_ const DeviceConfigRgb5050_t *Rgb5050Config() const noexcept
-        {
-            return m_ptrRgb5050.get();
-        };
-
-        _Ret_maybenull_ const DeviceConfigDmx_t *DmxConfig() const noexcept
-        {
-            return m_ptrDmx.get();
-        };
+            return m_sConfig;
+        }
 
     private:
-        BYTE m_nReplyVersion{ 0 };
-        BYTE m_nConfigVersion{ 0 };
-        OutputControllerType_t m_nOutputControllerType{ OutputControllerTypeNone };
-        DWORD m_dwCommandFlags{ 0 };
-        BOOL m_bKnownControllerType{ FALSE };
-        std::unique_ptr<DeviceConfigRgb5050_t> m_ptrRgb5050;
-        std::unique_ptr<DeviceConfigDmx_t> m_ptrDmx;
+        InputConfig_t m_sConfig{};
 
         friend class CIotCommClient;
     };
 
-    typedef struct DeviceConfig_s {
-        BYTE nVersion{ 1 };
-        OutputControllerType_t nOutputControllerType{ OutputControllerTypeNone };
-        CDeviceConfigCommandResult::DeviceConfigRgb5050_t sRgb5050;
-        CDeviceConfigCommandResult::DeviceConfigDmx_t sDmx;
-    } DeviceConfig_t;
+    class CLightingConfigCommandResult : public CBaseCommandResult
+    {
+    public:
+        CLightingConfigCommandResult() = default;
+        explicit CLightingConfigCommandResult(_In_ HRESULT _hrInternalError) noexcept : CBaseCommandResult(_hrInternalError)
+        {
+        }
+        CLightingConfigCommandResult(_In_ const CLightingConfigCommandResult &) = delete;
+        CLightingConfigCommandResult(_Inout_ CLightingConfigCommandResult &&) noexcept = default;
+        ~CLightingConfigCommandResult() = default;
+
+        CLightingConfigCommandResult &operator=(_In_ const CLightingConfigCommandResult &) = delete;
+        CLightingConfigCommandResult &operator=(_Inout_ CLightingConfigCommandResult &&) noexcept = default;
+
+        const LightingConfig_t &Config() const noexcept
+        {
+            return m_sConfig;
+        }
+
+    private:
+        LightingConfig_t m_sConfig{};
+
+        friend class CIotCommClient;
+    };
 
 public:
     CIotCommClient() = default;
@@ -288,7 +275,7 @@ public:
     BOOL MustChangeCredentials() const noexcept;
 
     HRESULT SendCommand(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen);
-    HRESULT SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen,
+    HRESULT SendCommandAndWaitReply(_In_ USHORT nCmd, _In_reads_bytes_opt_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen,
                                     _Out_ std::vector<BYTE> &reply) noexcept;
     CCommandResult OpenUdpChannel();
     HRESULT SendUdpCommand(_In_ USHORT nCmd, _In_reads_bytes_(nPayloadLen) LPCVOID lpPayload, _In_ SIZE_T nPayloadLen);
@@ -303,10 +290,19 @@ public:
                                                 _In_reads_bytes_(nNewPublicKeyLen) LPCVOID lpNewPublicKey,
                                                 _In_ SIZE_T nNewPublicKeyLen);
     CCommandResult SetHostNameCommand(_In_z_ LPCSTR szHostNameA);
-    CDeviceConfigCommandResult GetDeviceConfigCommand();
-    CCommandResult SetDeviceConfigCommand(_In_ const DeviceConfig_t &sConfig);
-    HRESULT SetRawDmxChannelDataCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
-    HRESULT SetRawDmxChannelDataUdpCommand(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
+    CInputConfigCommandResult GetInputConfigCommand();
+    CCommandResult SetInputConfigCommand(_In_ const InputConfig_t &sConfig);
+    CLightingConfigCommandResult GetLightingConfigCommand();
+    CCommandResult SetLightingConfigCommand(_In_ const LightingConfig_t &sConfig);
+    CCommandResult RebootCommand();
+    HRESULT SetRawDmxChannelDataCommand(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                        _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
+    HRESULT SetRawDmxChannelDataUdpCommand(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                           _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
+    HRESULT SetRawWs281xRgbDataCommand(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                        _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen);
+    HRESULT SetRawWs281xRgbDataUdpCommand(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                           _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen);
 
     static CCommandResult BuildCommandResultFromStandardReply(_In_ std::vector<BYTE> &reply);
 
@@ -332,8 +328,8 @@ private:
     VOID OnWsError(_In_ HRESULT hRes, _In_ BOOL bIsRead);
 
     ULONGLONG GetNextTxCounter() const;
-    HRESULT EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_(nDataLen) _In_ LPCVOID lpData, _In_ SIZE_T nDataLen);
-    HRESULT EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_(nDataLen) _In_ LPCVOID lpData, _In_ SIZE_T nDataLen);
+    HRESULT EncryptAndSend(_In_ USHORT nCmd, _In_reads_bytes_opt_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
+    HRESULT EncryptAndSendUdp(_In_ USHORT nCmd, _In_reads_bytes_opt_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen);
     VOID OnCommandReply(_In_ USHORT nCmd, _Inout_ std::vector<BYTE> &vecInput, _In_ ULONGLONG ullReplyCounter);
     VOID OnServerCommand(_In_ USHORT nCmd, _In_ LPBYTE lpData, _In_ SIZE_T nDataLen);
 
@@ -346,10 +342,16 @@ private:
 
     VOID NotifyClose(_In_ USHORT nCode, _In_opt_z_ LPCSTR szReasonA, _In_ HRESULT hRes);
 
-    static CDeviceConfigCommandResult BuildDeviceConfigCommandResult(_In_ const std::vector<BYTE> &reply);
-    static HRESULT BuildDeviceConfigPayload(_In_ const DeviceConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept;
-    static HRESULT BuildRawDmxChannelDataPayload(_In_ USHORT nStartChannel, _In_reads_bytes_(nDataLen) LPCVOID lpData,
-                                                 _In_ SIZE_T nDataLen, _Out_ std::vector<BYTE> &payload) noexcept;
+    static CInputConfigCommandResult BuildInputConfigCommandResult(_In_ const std::vector<BYTE> &reply);
+    static CLightingConfigCommandResult BuildLightingConfigCommandResult(_In_ const std::vector<BYTE> &reply);
+    static HRESULT BuildInputConfigPayload(_In_ const InputConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept;
+    static HRESULT BuildLightingConfigPayload(_In_ const LightingConfig_t &sConfig, _Out_ std::vector<BYTE> &payload) noexcept;
+    static HRESULT BuildRawDmxChannelDataPayload(_In_ BYTE byTarget, _In_ USHORT nStartChannel,
+                                                  _In_reads_bytes_(nDataLen) LPCVOID lpData, _In_ SIZE_T nDataLen,
+                                                  _Out_ std::vector<BYTE> &payload) noexcept;
+    static HRESULT BuildRawWs281xRgbDataPayload(_In_ BYTE byTarget, _In_ USHORT nFirstLed, _In_ USHORT nLedCount,
+                                                 _In_reads_bytes_(nRgbDataLen) LPCVOID lpRgbData, _In_ SIZE_T nRgbDataLen,
+                                                 _Out_ std::vector<BYTE> &payload) noexcept;
 
 private:
     typedef struct PendingReply_s {

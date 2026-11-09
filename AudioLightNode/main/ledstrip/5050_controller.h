@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 // -----------------------------------------------------------------------------
+// RGB5050 configuration
 
 typedef struct LedStrip5050Config_s {
     gpio_num_t redGpioPin;
@@ -25,12 +26,12 @@ esp_err_t ledStrip5050ReadConfig(binary_reader_t* br, LedStrip5050Config_t* conf
 size_t ledStrip5050CalcConfigSize(const LedStrip5050Config_t* config);
 bool ledStrip5050WriteConfig(binary_writer_t* bw, const LedStrip5050Config_t* config);
 
-esp_err_t ledStrip5050Init(const LedStrip5050Config_t* config);
-void ledStrip5050Deinit();
+esp_err_t ledStrip5050Init(size_t slot, const LedStrip5050Config_t* config);
+void ledStrip5050Deinit(size_t slot);
 
-esp_err_t ledStrip5050Set(uint16_t r, uint16_t g, uint16_t b);
-esp_err_t ledStrip5050FadeTo(uint16_t r, uint16_t g, uint16_t b, uint32_t ms);
-esp_err_t ledStrip5050SetAndFadeTo(uint16_t rStart, uint16_t gStart, uint16_t bStart, uint16_t rEnd, uint16_t gEnd, uint16_t bEnd,
+esp_err_t ledStrip5050Set(size_t slot, uint16_t r, uint16_t g, uint16_t b);
+esp_err_t ledStrip5050FadeTo(size_t slot, uint16_t r, uint16_t g, uint16_t b, uint32_t ms);
+esp_err_t ledStrip5050SetAndFadeTo(size_t slot, uint16_t rStart, uint16_t gStart, uint16_t bStart, uint16_t rEnd, uint16_t gEnd, uint16_t bEnd,
                                    uint32_t ms);
 
 #ifdef __cplusplus

@@ -34,8 +34,9 @@
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.63.0",
-		"@mxmauro/iot-comm.js": "^0.2.2",
+		"@mxmauro/iot-comm.js": "^0.3.1",
 		"@tailwindcss/vite": "^4.3.3",
+		"@wailsio/runtime": "^3.1.0",
 		"tailwindcss": "^4.3.3"
 	},
 	"allowScripts": {

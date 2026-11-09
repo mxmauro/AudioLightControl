@@ -1,4 +1,7 @@
-/build/bin/
+/.wails/
+/build/
+/not_used/
 /frontend/dist/
+/frontend/src/bindings/
 /frontend/node_modules/
 /vendor/

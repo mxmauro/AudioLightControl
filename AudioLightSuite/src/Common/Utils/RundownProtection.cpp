@@ -21,7 +21,9 @@ BOOL RundownProt_Acquire(_Inout_ _Interlocked_operand_ LONG volatile *lpnValue)
     {
         initVal = newVal;
         if ((initVal & RP_TEARING_DOWN_MASK) != 0)
+        {
             return FALSE;
+        }
         newVal = _InterlockedCompareExchange(lpnValue, initVal + 1, initVal);
     }
     while (newVal != initVal);

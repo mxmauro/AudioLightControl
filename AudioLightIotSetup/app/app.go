@@ -1,145 +1,98 @@
 package app
 
 import (
-	"context"
 	"embed"
+	"log/slog"
 	"strconv"
-	"sync"
 
 	"AudioLightIotSetup/utils"
-	"AudioLightIotSetup/utils/storage"
 
-	"github.com/wailsapp/wails/v2/pkg/application"
-	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // -----------------------------------------------------------------------------
 
-// App struct
-type App struct {
-	ctx context.Context
-
-	app *application.Application
-	stg *storage.Storage
-
-	closeMu       sync.Mutex
-	closeApproved bool
-}
-
-// -----------------------------------------------------------------------------
-
 func Run(assets embed.FS) error {
+	var mainWnd *application.WebviewWindow
+
 	sessionID, err := utils.GetSessionID()
 	if err != nil {
 		return err
 	}
 
-	a := App{}
+	closeControl := &CloseControlService{}
 
-	a.stg, err = storage.New()
+	// Create application
+	appOpts := application.Options{
+		Name: "AudioLight IoT Setup",
+		Services: []application.Service{
+			application.NewService(&StorageService{}),
+			application.NewService(closeControl),
+		},
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+
+		LogLevel: slog.LevelWarn,
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "AudioLightIotSetup-" + strconv.Itoa(sessionID),
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				// Focus the window if needed
+				if mainWnd != nil {
+					mainWnd.Restore()
+					mainWnd.Focus()
+				}
+			},
+		},
+	}
+	err = addPerOsApplicationOptions(&appOpts)
 	if err != nil {
 		return err
 	}
 
-	opts := options.App{
-		Title:            "AudioLight IoT Setup",
-		Width:            1024,
-		Height:           800,
-		MinWidth:         1024,
-		MinHeight:        800,
-		WindowStartState: options.Normal,
-		Frameless:        true,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	app := application.New(appOpts)
+
+	// Create main window
+	wndOpts := application.WebviewWindowOptions{
+		Name:       "main-window",
+		Title:      "AudioLight IoT Setup",
+		Width:      1024,
+		Height:     800,
+		MinWidth:   1024,
+		MinHeight:  800,
+		StartState: application.WindowStateNormal,
+		Frameless:  true,
+		Permissions: map[application.PermissionType]application.Permission{
+			application.PermissionNotifications: application.PermissionAllow,
 		},
-		BackgroundColour: &options.RGBA{
-			R: 0x09, G: 0x12, B: 0x24, A: 255,
-		},
-		OnStartup:     a.onAppStartup,
-		OnShutdown:    a.onAppShutdown,
-		OnBeforeClose: a.onBeforeClose,
-		Bind: []any{
-			&a,
-			a.stg,
-		},
-		// Logger:             logger.WrapWailsLogger(lg),
-		LogLevel:           wailslogger.TRACE,
-		LogLevelProduction: wailslogger.ERROR,
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId:               "AudioLightIotSetup-" + strconv.Itoa(sessionID),
-			OnSecondInstanceLaunch: a.onSecondInstanceLaunch,
+		BackgroundColour: application.RGBA{
+			Red: 0x09, Green: 0x12, Blue: 0x24, Alpha: 255,
 		},
 	}
-	err = addPerOsConfig(&opts)
+	err = addPerOsWebviewWindowOptions(&wndOpts)
 	if err != nil {
 		return err
 	}
 
-	// Create application and run it
-	a.app = application.NewWithOptions(&opts)
-	err = a.app.Run()
-	a.app = nil
+	mainWnd = app.Window.NewWithOptions(wndOpts)
+	mainWnd.OnWindowEvent(events.Common.WindowRuntimeReady, func(_ *application.WindowEvent) {
+		closeControl.markRuntimeReady()
+	})
+	mainWnd.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if !closeControl.isRuntimeReady() {
+			return
+		}
+		if closeControl.consumeAllowClose() {
+			return
+		}
+		event.Cancel()
+		mainWnd.EmitEvent("app:close-requested")
+	})
+
+	// Run application
+	err = app.Run()
 
 	// Done
 	return err
-}
-
-/*
-func (a *App) GetDmxFixtures() []dmx.Fixture {
-	return a.pdf.Fixtures
-}
-
-func (a *App) AddDmxFixture(_type string, channels []string, replace bool) string {
-	err := a.pdf.Add(_type, channels, replace)
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-func (a *App) RemoveDmxFixture(_type string) string {
-	err := a.pdf.Remove(_type)
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
-*/
-
-func (a *App) onAppShutdown(_ context.Context) {
-}
-
-func (a *App) ConfirmClose() {
-	// Allow the next native close after the frontend's leave guard has approved it.
-	a.closeMu.Lock()
-	a.closeApproved = true
-	a.closeMu.Unlock()
-
-	wailsruntime.Quit(a.ctx)
-}
-
-func (a *App) onBeforeClose(ctx context.Context) bool {
-	// Keep the window open until the frontend resolves any unsaved changes.
-	a.closeMu.Lock()
-	approved := a.closeApproved
-	a.closeMu.Unlock()
-	if approved {
-		return false
-	}
-
-	wailsruntime.EventsEmit(ctx, "app:close-requested")
-	return true
-}
-
-func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
-	wailsruntime.WindowShow(a.ctx)
-}
-
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) onAppStartup(ctx context.Context) {
-	a.ctx = ctx
 }

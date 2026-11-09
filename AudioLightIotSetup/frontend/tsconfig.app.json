@@ -22,5 +22,5 @@
 		"src/**/*.js",
 		"src/**/*.svelte"
 	],
-	"exclude": ["src/generated"]
+	"exclude": ["src/bindings"]
 }

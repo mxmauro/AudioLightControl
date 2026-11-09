@@ -52,6 +52,16 @@ select.select {
 	@apply placeholder:text-surface-600-400;
 }
 
+/* Keep custom input actions as the sole in-field controls across Wails webviews. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+	display: none;
+}
+
+input[type="password"]::-webkit-credentials-auto-fill-button {
+	visibility: hidden;
+}
+
 .label > span:first-child {
 	@apply font-medium text-surface-950-50;
 }

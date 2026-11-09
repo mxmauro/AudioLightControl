@@ -1,6 +1,7 @@
 #include "math.h"
 
 // -----------------------------------------------------------------------------
+// Numeric interpolation
 
 uint16_t lerp_u16(uint16_t a, uint16_t b, uint32_t pos, uint32_t total)
 {

@@ -1,4 +1,6 @@
 <script lang="ts">
+import EyeIcon from '@lucide/svelte/icons/eye';
+import EyeOffIcon from '@lucide/svelte/icons/eye-off';
 import RectangleEllipsisIcon from '@lucide/svelte/icons/rectangle-ellipsis';
 import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 import type { Client } from '@mxmauro/iot-comm.js';
@@ -10,6 +12,9 @@ let { client, onnotice }: { client: Client; onnotice: (notice: Notice) => void }
 let oldPrivateKey = $state('');
 let newPublicKey = $state('');
 let confirmation = $state('');
+let showOldPrivateKey = $state(false);
+let showNewPublicKey = $state(false);
+let showConfirmation = $state(false);
 let busy = $state(false);
 let errors = $state<Record<string, string>>({});
 let generatingKeyPair = $state(false);
@@ -71,15 +76,30 @@ const useGeneratedKeyPair = (key: string): void => {
 	<div class="space-y-2">
 		<label class="label"
 			><span class="label-text">Current private key</span>
-			<input
-				class="input"
-				type="password"
-				bind:value={oldPrivateKey}
-				autocomplete="off"
-				disabled={busy}
-				aria-invalid={!!errors.oldPrivateKey}
-				aria-describedby="old-private-key-error"
-			>
+			<div class="relative">
+				<input
+					class="input !pr-12"
+					type={showOldPrivateKey ? 'text' : 'password'}
+					bind:value={oldPrivateKey}
+					autocomplete="off"
+					disabled={busy}
+					aria-invalid={!!errors.oldPrivateKey}
+					aria-describedby="old-private-key-error"
+				>
+				<button
+					class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
+					type="button"
+					aria-label={showOldPrivateKey ? 'Hide current private key' : 'Show current private key'}
+					disabled={busy}
+					onclick={() => (showOldPrivateKey = !showOldPrivateKey)}
+				>
+					{#if showOldPrivateKey}
+						<EyeOffIcon />
+					{:else}
+						<EyeIcon />
+					{/if}
+				</button>
+			</div>
 			{#if errors.oldPrivateKey}
 				<small id="old-private-key-error" class="text-error-600-400">{errors.oldPrivateKey}</small>
 			{/if}</label
@@ -88,23 +108,38 @@ const useGeneratedKeyPair = (key: string): void => {
 			><span class="label-text">New public key</span>
 			<div class="relative">
 				<input
-					class="input !pr-12"
-					type="password"
+					class="input !pr-24"
+					type={showNewPublicKey ? 'text' : 'password'}
 					bind:value={newPublicKey}
 					autocomplete="off"
 					disabled={busy}
 					aria-invalid={!!errors.newPublicKey}
 					aria-describedby="new-public-key-error"
 				>
-				<button
-					class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
-					type="button"
-					aria-label="Generate public and private key pair"
-					disabled={busy}
-					onclick={() => (generatingKeyPair = true)}
-				>
-					<RectangleEllipsisIcon />
-				</button>
+				<div class="absolute inset-y-0 right-0 flex items-center gap-1 pr-1">
+					<button
+						class="btn-icon"
+						type="button"
+						aria-label="Generate public and private key pair"
+						disabled={busy}
+						onclick={() => (generatingKeyPair = true)}
+					>
+						<RectangleEllipsisIcon />
+					</button>
+					<button
+						class="btn-icon"
+						type="button"
+						aria-label={showNewPublicKey ? 'Hide new public key' : 'Show new public key'}
+						disabled={busy}
+						onclick={() => (showNewPublicKey = !showNewPublicKey)}
+					>
+						{#if showNewPublicKey}
+							<EyeOffIcon />
+						{:else}
+							<EyeIcon />
+						{/if}
+					</button>
+				</div>
 			</div>
 			{#if errors.newPublicKey}
 				<small id="new-public-key-error" class="text-error-600-400">{errors.newPublicKey}</small>
@@ -112,15 +147,30 @@ const useGeneratedKeyPair = (key: string): void => {
 		>
 		<label class="label"
 			><span class="label-text">Confirm new public key</span>
-			<input
-				class="input"
-				type="password"
-				bind:value={confirmation}
-				autocomplete="off"
-				disabled={busy}
-				aria-invalid={!!errors.confirmation}
-				aria-describedby="credential-confirmation-error"
-			>
+			<div class="relative">
+				<input
+					class="input !pr-12"
+					type={showConfirmation ? 'text' : 'password'}
+					bind:value={confirmation}
+					autocomplete="off"
+					disabled={busy}
+					aria-invalid={!!errors.confirmation}
+					aria-describedby="credential-confirmation-error"
+				>
+				<button
+					class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
+					type="button"
+					aria-label={showConfirmation ? 'Hide public-key confirmation' : 'Show public-key confirmation'}
+					disabled={busy}
+					onclick={() => (showConfirmation = !showConfirmation)}
+				>
+					{#if showConfirmation}
+						<EyeOffIcon />
+					{:else}
+						<EyeIcon />
+					{/if}
+				</button>
+			</div>
 			{#if errors.confirmation}
 				<small id="credential-confirmation-error" class="text-error-600-400">{errors.confirmation}</small>
 			{/if}</label

@@ -17,14 +17,14 @@ unexpected fingerprint change is rejected. Use **Forget device trust** before in
 
 ## Supported setup actions
 
-- Configure no output, RGB5050 GPIO output, or a 128-channel DMX universe with up to 16 fixtures.
-- Validate protocol limits before submission and require confirmation before applying persistent lighting settings.
+- Configure reset-button and IR-receiver GPIO inputs, including disconnected inputs.
+- Configure up to two ordered lighting outputs: RGB5050, WS281x strips with an optional mirror output, and at most one 128-channel DMX universe with up to 16 fixtures.
+- Validate GPIO assignments across input and lighting settings, require confirmation before saving lighting settings, then reboot explicitly to activate saved changes.
 - Set the device mDNS hostname and manage users, including credential creation, reset, deletion, and self-service credential change.
 
 Board-specific GPIO availability remains firmware-controlled and is reported as a device error.
 
 ## iot-comm.js package note
 
-The published `@mxmauro/iot-comm.js@0.1.5` browser export points at filenames that are not present in its package. `vite.config.ts`
-contains a temporary alias to the bundled browser module and `src/types/iot-comm.d.ts` supplies its declarations. Remove both after
-upgrading to the corrected library release.
+The frontend temporarily uses the local `mxmauro-iot-comm.js-0.3.1.tgz` package from the shared JavaScript libraries directory until
+that release is published. It supplies the AudioLightNode V2 input, lighting, raw DMX, raw WS281x, and reboot commands.

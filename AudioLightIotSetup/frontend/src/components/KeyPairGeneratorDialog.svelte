@@ -1,10 +1,12 @@
 <script lang="ts">
 import CheckIcon from '@lucide/svelte/icons/check';
 import CopyIcon from '@lucide/svelte/icons/copy';
+import EyeIcon from '@lucide/svelte/icons/eye';
+import EyeOffIcon from '@lucide/svelte/icons/eye-off';
 import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 import { Client } from '@mxmauro/iot-comm.js';
+import { Clipboard } from '@wailsio/runtime';
 import { onMount } from 'svelte';
-import { ClipboardSetText } from '../generated/wailsjs/runtime/runtime';
 import { errorMessage } from '../lib/ui';
 
 let { oncancel, onuse }: { oncancel: () => void; onuse: (publicKey: string) => void } = $props();
@@ -14,6 +16,8 @@ let error = $state('');
 let publicKeyCopied = $state(false);
 let privateKeyCopied = $state(false);
 let generating = $state(true);
+let showPublicKey = $state(true);
+let showPrivateKey = $state(false);
 
 // -----------------------------------------------------------------------------
 
@@ -47,7 +51,7 @@ const copyKey = async (key: string, label: string): Promise<boolean> => {
 		return false;
 	}
 	try {
-		await ClipboardSetText(key);
+		await Clipboard.SetText(key);
 		return true;
 	} catch (cause) {
 		error = `Could not copy the ${label}: ${errorMessage(cause)}`;
@@ -103,7 +107,7 @@ onMount(() => {
 				<label class="label">
 					<span class="label-text">Public key</span>
 					<div class="relative">
-						<input class="input !pr-24" type="text" value={publicKey} readonly autocomplete="off">
+						<input class="input !pr-36" type={showPublicKey ? 'text' : 'password'} value={publicKey} readonly autocomplete="off">
 						<div class="absolute inset-y-0 right-0 flex items-center gap-1 pr-1">
 							<button class="btn-icon" type="button" aria-label="Generate a new key pair" onclick={() => void generate()}>
 								<RefreshCwIcon />
@@ -115,25 +119,46 @@ onMount(() => {
 									<CopyIcon />
 								{/if}
 							</button>
+							<button
+								class="btn-icon"
+								type="button"
+								aria-label={showPublicKey ? 'Hide public key' : 'Show public key'}
+								onclick={() => (showPublicKey = !showPublicKey)}
+							>
+								{#if showPublicKey}
+									<EyeOffIcon />
+								{:else}
+									<EyeIcon />
+								{/if}
+							</button>
 						</div>
 					</div>
 				</label>
 				<label class="label">
 					<span class="label-text">Private key</span>
 					<div class="relative">
-						<input class="input !pr-12" type="password" value={privateKey} readonly autocomplete="off">
-						<button
-							class="btn-icon absolute inset-y-0 right-0 my-auto mr-1"
-							type="button"
-							aria-label="Copy private key"
-							onclick={() => void copyPrivateKey()}
-						>
-							{#if privateKeyCopied}
-								<CheckIcon />
-							{:else}
-								<CopyIcon />
-							{/if}
-						</button>
+						<input class="input !pr-24" type={showPrivateKey ? 'text' : 'password'} value={privateKey} readonly autocomplete="off">
+						<div class="absolute inset-y-0 right-0 flex items-center gap-1 pr-1">
+							<button class="btn-icon" type="button" aria-label="Copy private key" onclick={() => void copyPrivateKey()}>
+								{#if privateKeyCopied}
+									<CheckIcon />
+								{:else}
+									<CopyIcon />
+								{/if}
+							</button>
+							<button
+								class="btn-icon"
+								type="button"
+								aria-label={showPrivateKey ? 'Hide private key' : 'Show private key'}
+								onclick={() => (showPrivateKey = !showPrivateKey)}
+							>
+								{#if showPrivateKey}
+									<EyeOffIcon />
+								{:else}
+									<EyeIcon />
+								{/if}
+							</button>
+						</div>
 					</div>
 				</label>
 			</div>

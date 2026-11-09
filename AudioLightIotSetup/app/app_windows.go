@@ -3,21 +3,29 @@ package app
 import (
 	"AudioLightIotSetup/utils"
 
-	"github.com/wailsapp/wails/v2/pkg/options"
-	wailswindows "github.com/wailsapp/wails/v2/pkg/options/windows"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // -----------------------------------------------------------------------------
 
-func addPerOsConfig(opts *options.App) error {
+func addPerOsApplicationOptions(opts *application.Options) error {
 	dir, err := utils.EnsureDataDir("UI")
 	if err != nil {
 		return err
 	}
 
-	opts.Windows = &wailswindows.Options{
+	opts.Windows = application.WindowsOptions{
+		WndClass:            "AudioLightIotSetupClassWnd",
 		WebviewUserDataPath: dir,
-		WindowClassName:     "AudioLightIotSetupClassWnd",
+	}
+
+	// Done
+	return nil
+}
+
+func addPerOsWebviewWindowOptions(opts *application.WebviewWindowOptions) error {
+	opts.Windows = application.WindowsWindow{
+		NonClientRegionSupport: true,
 	}
 
 	// Done

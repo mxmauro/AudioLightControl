@@ -73,6 +73,7 @@ public:
     HRESULT Initialize(_In_ InitParams_t &sInitParams) noexcept;
     VOID Finalize() noexcept;
 
+    // Returns S_FALSE if the loop must continue
     HRESULT ProcessMessages(_In_opt_ BOOL bWaitForMessage = TRUE) noexcept;
 
     HRESULT AttachWindow(_In_ CTUiWindow *lpWindow, _In_ INT iX, _In_ INT iY) noexcept;
